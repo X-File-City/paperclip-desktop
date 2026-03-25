@@ -20,12 +20,14 @@ const PID_FILE_NAME = "paperclip-electron.pid";
 // Paths
 // ---------------------------------------------------------------------------
 
-/** Resolve the monorepo root (one level up from electron/) */
+/** Resolve the monorepo root (two levels up from electron/dist/) */
 function getMonorepoRoot(): string {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, "app-server");
   }
-  return path.resolve(app.getAppPath(), "..");
+  // app.getAppPath() returns electron/dist/ in dev mode (where main.js lives),
+  // so we go up twice: dist/ → electron/ → monorepo root
+  return path.resolve(app.getAppPath(), "..", "..");
 }
 
 // ---------------------------------------------------------------------------
@@ -215,6 +217,21 @@ function killOrphanedServer(): void {
 }
 
 /**
+ * Resolve PAPERCLIP_HOME: prefer an existing ~/.paperclip instance (the
+ * default dev/CLI location) so the desktop app shares the same database.
+ * Falls back to the Electron-standard userData directory for first-time users.
+ */
+function resolvePaperclipHome(): string {
+  const home = process.env.HOME ?? "";
+  const defaultHome = path.join(home, ".paperclip");
+  const defaultInstance = path.join(defaultHome, "instances", "default", "db");
+  if (home && fs.existsSync(defaultInstance)) {
+    return defaultHome;
+  }
+  return app.getPath("userData");
+}
+
+/**
  * Spawn the Paperclip server as a child process.
  */
 function startServer(port: number): ChildProcess {
@@ -226,6 +243,8 @@ function startServer(port: number): ChildProcess {
   if (app.isPackaged) {
     const serverEntry = path.join(root, "server", "dist", "index.js");
     const enrichedPath = resolveShellPath();
+    const paperclipHome = resolvePaperclipHome();
+    console.log(`Using PAPERCLIP_HOME: ${paperclipHome}`);
     child = spawn(findNodeBinary(), [serverEntry], {
       cwd: root,
       env: {
@@ -233,7 +252,7 @@ function startServer(port: number): ChildProcess {
         PATH: enrichedPath,
         NODE_ENV: "production",
         PORT: String(port),
-        PAPERCLIP_HOME: app.getPath("userData"),
+        PAPERCLIP_HOME: paperclipHome,
         // Always auto-apply pending migrations on startup — Electron spawns the
         // server with stdin ignored (not a TTY) so the TTY heuristic in the
         // server would auto-apply anyway, but this makes the intent explicit and
