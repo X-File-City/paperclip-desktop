@@ -17,5 +17,14 @@
     <!-- Allow child processes (spawning the server, embedded postgres) -->
     <key>com.apple.security.cs.allow-dyld-environment-variables</key>
     <true/>
+    <!-- File access: the server needs to read/write project files in user-chosen directories -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <key>com.apple.security.files.downloads.read-write</key>
+    <true/>
+    <key>com.apple.security.files.documents.read-write</key>
+    <true/>
+    <key>com.apple.security.files.desktop.read-write</key>
+    <true/>
 </dict>
 </plist>
