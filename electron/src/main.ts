@@ -165,6 +165,7 @@ function resolveShellPath(): string {
     } catch { /* nvm not present */ }
   }
 
+  let basePath = process.env.PATH ?? "";
   try {
     const userShell = process.env.SHELL || "/bin/zsh";
     // Use -lc (login, non-interactive) to avoid .bashrc/.zshrc side effects
@@ -173,14 +174,16 @@ function resolveShellPath(): string {
       timeout: 5000,
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    if (shellPath) return shellPath;
+    if (shellPath) basePath = shellPath;
   } catch { /* shell probe failed */ }
 
+  // Always merge well-known directories into the resolved PATH so that
+  // tools like `claude` installed in ~/.npm-global/bin are discoverable
+  // even if the user's shell profile doesn't export them.
   const sep = path.delimiter;
-  const current = process.env.PATH ?? "";
-  const existing = new Set(current.split(sep));
+  const existing = new Set(basePath.split(sep));
   const missing = fallbackDirs.filter((d) => !existing.has(d));
-  return missing.length > 0 ? current + sep + missing.join(sep) : current;
+  return missing.length > 0 ? basePath + sep + missing.join(sep) : basePath;
 }
 
 // ---------------------------------------------------------------------------
