@@ -1,0 +1,369 @@
+# Paperclip Desktop — Architecture & Operations Guide
+
+## Overview
+
+Paperclip Desktop is a standalone Electron wrapper around the [Paperclip](https://github.com/paperclipai/paperclip) server. It consumes `@paperclipai/server` and related packages from npm — it does **not** contain the engine source code.
+
+The Electron app spawns the Paperclip server as a child process and loads the UI via HTTP on localhost. It ships a bundled Node.js binary so end users don't need Node installed.
+
+## Repository structure
+
+```
+paperclip-desktop/
+  src/
+    main.ts              Electron main process — window lifecycle, server spawn, splash screen
+    preload.ts           Renderer preload — exposes updater IPC to the UI
+    splash-preload.ts    Splash window preload — status update IPC
+    updater.ts           Auto-updater — checks GitHub Releases every 4h
+  scripts/
+    prepare-server.mjs   Installs @paperclipai/server from npm, bundles node_modules + Node binary
+    build-ui.mjs         Clones upstream repo, builds the UI, copies dist into the server bundle
+    after-pack.mjs       electron-builder afterPack hook — macOS ad-hoc signing
+    dev.mjs              Dev script — compiles TS and launches Electron
+  build/
+    entitlements.mac.plist   macOS hardened runtime entitlements
+    icon.png                 macOS/Linux app icon
+    icon.ico                 Windows app icon
+  .github/workflows/
+    release.yml              Builds desktop binaries on v* tag push
+    sync-upstream.yml        Polls npm every 6h for @paperclipai/server updates
+  docs-desktop/              Documentation (this directory)
+  electron-builder.yml       electron-builder config (targets, signing, publish)
+  package.json               Dependencies and scripts
+  tsconfig.json              TypeScript configuration
+```
+
+## How it works
+
+### Packaged app (production)
+
+```
+Contents/Resources/
+  app-server/
+    server/
+      dist/index.js      ← @paperclipai/server entry point (spawned by Electron)
+      ui-dist/            ← built React UI (served by the Express server)
+      node_modules/       ← all production deps (flat npm install)
+      package.json
+    node-bin/
+      node               ← bundled Node.js v22.15.0
+  app/
+    dist/main.js         ← Electron main process
+    dist/preload.js
+    dist/updater.js
+    package.json
+```
+
+1. Electron starts, creates a splash window with progress steps
+2. Finds a free TCP port (starting from 3100)
+3. Spawns `node server/dist/index.js` with env vars: `PORT`, `PAPERCLIP_HOME`, `PAPERCLIP_MIGRATION_AUTO_APPLY=true`, enriched `PATH`
+4. Waits for the server to accept connections (60s timeout)
+5. Creates the main BrowserWindow, loads `http://localhost:{port}`
+6. Destroys the splash, shows the main window
+7. Initialises the auto-updater (checks GitHub Releases)
+
+### Dev mode
+
+In dev mode (`pnpm dev`), the server is spawned from `node_modules/@paperclipai/server/dist/index.js` directly. The UI may not be available (the npm package doesn't include `ui-dist/`), so dev mode is primarily for working on the Electron shell itself. Use `pnpm pack` for full integration testing with the UI.
+
+## Dependencies
+
+### Runtime (bundled into the app)
+
+| Package | Purpose |
+|---------|---------|
+| `tree-kill` | Kill server process tree on quit |
+| `electron-updater` | Check GitHub Releases for updates, download, prompt restart |
+| `electron-log` | Structured logging for the updater |
+
+### Dev only
+
+| Package | Purpose |
+|---------|---------|
+| `@paperclipai/server` | Used by `prepare-server.mjs` to resolve the version to install |
+| `electron` | Electron framework |
+| `electron-builder` | Packages the app for macOS/Windows/Linux |
+| `typescript` | Compiles `src/*.ts` to `dist/*.js` |
+
+`@paperclipai/server` is a **devDependency** because the Electron main process never `require()`s it. It is only referenced by `prepare-server.mjs` to know which version to install in the server bundle. At runtime, Electron spawns the bundled Node binary against the bundled `server/dist/index.js`.
+
+## Build pipeline
+
+### Full build (what `pnpm pack` and `pnpm dist` do)
+
+```
+pnpm build              →  tsc: compiles src/*.ts to dist/*.js
+pnpm prepare-server     →  installs @paperclipai/server from npm into build/server-bundle/
+                            downloads Node.js v22.15.0 binaries to build/node-bin/
+                            validates migration SQL files
+pnpm build-ui           →  clones upstream repo at matching tag
+                            runs pnpm --filter @paperclipai/ui build
+                            copies ui/dist/ into build/server-bundle/server/ui-dist/
+electron-builder        →  packages everything into .dmg/.exe/.AppImage
+```
+
+### `scripts/prepare-server.mjs` in detail
+
+1. Reads `@paperclipai/server` version from `package.json` devDependencies
+2. Creates `build/server-staging/` with a minimal package.json
+3. Runs `npm install --production` to get the server + all transitive deps
+4. Copies server dist, package.json, skills, and node_modules into `build/server-bundle/server/`
+5. Fixes macOS dylib soname symlinks for `@embedded-postgres` (needed by dyld)
+6. Downloads Node.js v22.15.0 for current platform architectures
+7. Removes macOS Finder duplicate files (iCloud sync artifacts)
+8. Validates that `@paperclipai/db/dist/migrations/*.sql` files are present
+9. Cleans up the staging directory
+
+### `scripts/build-ui.mjs` in detail
+
+1. Checks if `build/server-bundle/server/ui-dist/index.html` already exists (skip if so)
+2. **Future-proof check:** tries to install `@paperclipai/ui` from npm (not published yet)
+3. Falls back to cloning `paperclipai/paperclip` at the matching git tag (`v{version}`)
+4. Runs `pnpm install` + `pnpm --filter @paperclipai/ui build` in the clone
+5. Copies the built `ui/dist/` into the server bundle
+6. Removes the clone
+
+When `@paperclipai/ui` is eventually published to npm, step 2 will succeed and the clone step is skipped automatically.
+
+## Auto-updater
+
+The app uses `electron-updater` to check for new versions via GitHub Releases.
+
+### How it works
+
+- On app launch (after the main window shows), `initAutoUpdater()` is called
+- Checks for updates immediately, then every 4 hours
+- If an update is found, it auto-downloads in the background
+- Once downloaded, shows a dialog: "Paperclip v{version} has been downloaded. Restart now to apply the update?"
+- User can choose "Restart" (applies immediately) or "Later" (applies on next quit)
+- Skipped entirely in dev mode (`!app.isPackaged`)
+
+### How it finds updates
+
+`electron-builder.yml` has a `publish` section:
+
+```yaml
+publish:
+  provider: github
+  owner: aronprins
+  repo: paperclip-desktop
+  releaseType: release
+```
+
+`electron-builder` generates `latest.yml` / `latest-mac.yml` / `latest-linux.yml` manifests alongside the release assets. `electron-updater` fetches these manifests to determine if a newer version is available.
+
+### Renderer integration
+
+The updater sends status events to the renderer via IPC:
+
+```typescript
+// In the renderer (via window.paperclip.updater):
+window.paperclip.updater.onStatus((data) => {
+  // data.status: "checking" | "available" | "up-to-date" | "downloading" | "downloaded" | "error"
+  // data.version?: string (when status is "available" or "downloaded")
+  // data.percent?: number (when status is "downloading")
+});
+```
+
+## Data and state
+
+### PAPERCLIP_HOME
+
+The app resolves `PAPERCLIP_HOME` at startup:
+
+1. If `~/.paperclip/instances/default/db` exists → uses `~/.paperclip` (shares data with the CLI)
+2. Otherwise → uses the Electron `userData` directory (`~/Library/Application Support/Paperclip` on macOS)
+
+This ensures the desktop app and CLI share the same database when both are installed.
+
+### PID file
+
+Writes `paperclip-electron.pid` to the `userData` directory. On startup, checks for an orphaned server process from a previous crash and kills it.
+
+### Server log
+
+Server stdout/stderr is written to `{userData}/server.log` (appended on each launch).
+
+## PATH enrichment
+
+Electron apps launched from Finder/Dock inherit a minimal PATH. The app:
+
+1. Probes the user's login shell PATH (`$SHELL -lc 'echo $PATH'`)
+2. Merges well-known directories: `~/.local/bin`, `~/.npm-global/bin`, NVM bin, `/opt/homebrew/bin`, etc.
+3. Passes the enriched PATH to the server process
+
+This ensures tools like `claude` CLI are discoverable by the server.
+
+---
+
+## Scripts reference
+
+| Command | What it does |
+|---------|-------------|
+| `pnpm dev` | Compile TS + launch Electron (dev mode, no UI) |
+| `pnpm build` | Compile TypeScript only |
+| `pnpm prepare-server` | Install server from npm + download Node binary |
+| `pnpm build-ui` | Clone upstream + build UI |
+| `pnpm pack` | Full build → packaged app in `release/` (unpacked) |
+| `pnpm dist` | Full build → distributable installers in `release/` |
+| `pnpm dist:mac` | Full build → macOS .dmg + .zip |
+| `pnpm dist:win` | Full build → Windows NSIS + portable |
+| `pnpm dist:linux` | Full build → Linux AppImage + .deb |
+
+---
+
+## Releases
+
+### How automated releases work
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              sync-upstream (every 6h via cron)           │
+│                                                         │
+│  npm: @paperclipai/server → new version?                │
+│       │                              │         │        │
+│       │ no change            success ↓         ↓ fail   │
+│       └→ skip          commit + tag v*    open issue    │
+└───────────────────────────────┼──────────────────────────┘
+                                │
+                       push tag v*
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────┐
+│              release (triggered by v* tag)               │
+│                                                         │
+│  ┌─────────┐  ┌─────────┐  ┌──────────────┐           │
+│  │  macOS   │  │ Windows │  │    Linux     │           │
+│  │ dmg+zip  │  │  nsis   │  │ AppImage+deb │           │
+│  └────┬─────┘  └────┬────┘  └──────┬───────┘           │
+│       └──────────────┼─────────────┘                    │
+│                      ▼                                  │
+│          GitHub Release + assets                        │
+│        (latest.yml / latest-mac.yml)                    │
+└─────────────────────────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│            Electron app (user's machine)                │
+│                                                         │
+│  electron-updater checks GitHub Releases → download     │
+│  → prompt "Restart to update?" → install                │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Creating a release manually
+
+1. Make sure all changes are committed
+2. Bump the version:
+   ```bash
+   pnpm version patch   # or minor/major
+   ```
+3. Push the tag:
+   ```bash
+   git push origin master --tags
+   ```
+4. The `release.yml` workflow triggers automatically, builds for all platforms, and publishes to GitHub Releases
+
+### Checking for upstream updates manually
+
+To check if a new `@paperclipai/server` version is available without waiting for the cron:
+
+```bash
+# Check what's on npm vs what's in package.json
+CURRENT=$(node -p "require('./package.json').devDependencies['@paperclipai/server']")
+LATEST=$(pnpm view @paperclipai/server version)
+echo "Current: $CURRENT"
+echo "Latest:  $LATEST"
+```
+
+To manually trigger the sync workflow from the command line:
+
+```bash
+gh workflow run sync-upstream.yml
+```
+
+Or with force (even if version hasn't changed):
+
+```bash
+gh workflow run sync-upstream.yml -f force=true
+```
+
+### Updating the upstream dependency manually
+
+If you prefer to update manually instead of waiting for automation:
+
+```bash
+# Update to latest
+pnpm pkg set "devDependencies.@paperclipai/server=$(pnpm view @paperclipai/server version)"
+pnpm install
+
+# Test the build
+pnpm build && pnpm prepare-server && pnpm build-ui && pnpm pack
+
+# If it works, commit and tag
+git add -A
+git commit -m "chore: sync upstream @paperclipai/server to $(pnpm view @paperclipai/server version)"
+pnpm version patch
+git push origin master --tags
+```
+
+### Code signing (future)
+
+The release workflow has commented-out code signing configuration. When ready:
+
+1. Add these secrets to the GitHub repo (Settings → Secrets → Actions):
+
+   | Secret | Purpose |
+   |--------|---------|
+   | `MAC_CERTIFICATE` | Base64-encoded .p12 Apple Developer cert |
+   | `MAC_CERTIFICATE_PASSWORD` | Password for the .p12 |
+   | `APPLE_ID` | Apple ID email for notarization |
+   | `APPLE_APP_PASSWORD` | App-specific password |
+   | `APPLE_TEAM_ID` | Apple Developer Team ID |
+   | `WIN_CERTIFICATE` | Base64-encoded .pfx code signing cert |
+   | `WIN_CERTIFICATE_PASSWORD` | Password for the .pfx |
+
+2. Uncomment the corresponding env vars in `.github/workflows/release.yml`
+
+### GitHub repo setup for releases
+
+Create these issue labels (used by the sync workflow when builds fail):
+- `upstream-sync`
+- `bug`
+
+---
+
+## Troubleshooting
+
+### Server doesn't start
+
+Check `~/Library/Application Support/Paperclip/server.log` (macOS) for the server output. Common issues:
+- Port 3100 already in use (the app will try the next 100 ports)
+- Database corruption — delete `~/.paperclip/instances/default/db/` to reset
+- Migration failure — check the log for SQL errors
+
+### Orphaned server process
+
+If the app crashed and a server is still running:
+- The app detects this on next launch via the PID file and kills it
+- Manual cleanup: `kill $(cat ~/Library/Application\ Support/Paperclip/paperclip-electron.pid)`
+
+### Build fails on macOS with codesign errors
+
+The `after-pack.mjs` script strips extended attributes and ad-hoc signs the app. If it fails:
+- Ensure Xcode Command Line Tools are installed: `xcode-select --install`
+- Check for Finder duplicate files in the build output (the script detects these)
+
+### UI not loading
+
+In the packaged app, the server looks for UI files at `server/ui-dist/index.html`. If this is missing:
+- Re-run `pnpm build-ui` to rebuild from upstream
+- Check that the upstream tag matches the server version
+
+---
+
+## Future: when @paperclipai/ui is published
+
+When the upstream project publishes `@paperclipai/ui` to npm, `scripts/build-ui.mjs` will automatically detect it and install from npm instead of cloning the repo. No code changes needed — the future-proof check is already in the script.
+
+At that point, you can optionally simplify `build-ui.mjs` by removing the clone fallback, and add `@paperclipai/ui` as an explicit devDependency in `package.json`.

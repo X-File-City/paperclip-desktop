@@ -1,52 +1,29 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
-.env
-*.tsbuildinfo
-drizzle/meta/
-.vite/
-coverage/
+build/server-bundle/
+build/server-staging/
+build/node-bin/
+build/upstream-clone/
+
+# Electron-builder output
+release/
+
+# OS files
 .DS_Store
-data/
-.paperclip/
-.pnpm-store/
-tmp-*
-cli/tmp/
+Thumbs.db
 
-# Scratch/seed scripts (but not scripts/ dir)
-check-*.mjs
-!scripts/check-*.mjs
-new-agent*.json
-newcompany.json
-seed-*.mjs
-server/check-*.mjs
-server/seed-*.mjs
-packages/db/seed-*.mjs
-
-# npm publish build artifacts
-cli/package.dev.json
-
-# Build artifacts in src directories
-server/src/**/*.js
-server/src/**/*.js.map
-server/src/**/*.d.ts
-server/src/**/*.d.ts.map
-tmp/
-
-# Editor / tool temp files
-*.tmp
+# IDE
+.idea/
 .vscode/
-.claude/settings.local.json
-.paperclip-local/
-/.idea/
-/.agents/
+*.swp
+*.swo
 
-# Doc maintenance cursor
-.doc-review-cursor
+# Logs
+*.log
 
-# Playwright
-tests/e2e/test-results/
-tests/e2e/playwright-report/
-tests/release-smoke/test-results/
-tests/release-smoke/playwright-report/
-.superset/
-.claude/worktrees/
+# Environment
+.env
+.env.local
