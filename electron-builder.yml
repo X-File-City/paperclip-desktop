@@ -48,6 +48,10 @@ afterPack: scripts/after-pack.mjs
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.png
+  # Signing is handled entirely by afterPack (scripts/after-pack.mjs).
+  # Setting identity to null prevents electron-builder from attempting its own
+  # signing pass, which would conflict with afterPack's signatures (Team ID mismatch).
+  identity: null
   target:
     - target: dmg
       arch:
