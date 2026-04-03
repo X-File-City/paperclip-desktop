@@ -83,6 +83,10 @@ jobs:
           api_key = os.environ["APPLE_API_KEY_P8"]
           if "\\n" in api_key and "\n" not in api_key:
               api_key = api_key.replace("\\n", "\n")
+          if "BEGIN PRIVATE KEY" not in api_key:
+              api_key = base64.b64decode("".join(api_key.split())).decode("utf-8")
+          if not api_key.endswith("\n"):
+              api_key += "\n"
           Path(os.environ["API_KEY_PATH"]).write_text(api_key, encoding="utf-8")
           PY
 
