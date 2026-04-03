@@ -71,7 +71,9 @@ try {
     mkdirSync(uiStagingDir, { recursive: true });
     execSync(`npm pack @paperclipai/ui@${uiVersion} --pack-destination "${uiStagingDir}"`, { stdio: "inherit" });
     // Extract and copy dist/
-    const tarballs = execSync(`ls "${uiStagingDir}"/*.tgz`, { encoding: "utf8" }).trim().split("\n");
+    const tarballs = readdirSync(uiStagingDir)
+      .filter((entry) => entry.endsWith(".tgz"))
+      .map((entry) => path.join(uiStagingDir, entry));
     if (tarballs[0]) {
       execSync(`tar -xzf "${tarballs[0]}" -C "${uiStagingDir}"`, { stdio: "inherit" });
       const uiDist = path.join(uiStagingDir, "package", "dist");
