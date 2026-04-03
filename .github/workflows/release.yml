@@ -165,7 +165,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: release-mac
-          path: release/**
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
+            release/*.yml
+            release/notarization/**
           if-no-files-found: error
 
       - name: Clean up Apple signing assets
@@ -216,7 +221,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: release-linux
-          path: release/**
+          path: |
+            release/*.AppImage
+            release/*.deb
+            release/*.blockmap
+            release/*.yml
           if-no-files-found: error
 
   build-windows:
@@ -258,7 +267,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
-          path: release/**
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/*.yml
           if-no-files-found: error
 
   publish-release:
