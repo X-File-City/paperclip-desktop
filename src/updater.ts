@@ -2,8 +2,22 @@ import { autoUpdater } from "electron-updater";
 import { app, dialog, BrowserWindow } from "electron";
 import log from "electron-log";
 
-// Route autoUpdater logs through electron-log
-autoUpdater.logger = log;
+const updaterLogger = {
+  info: (...args: unknown[]) => log.info(...args),
+  warn: (...args: unknown[]) => log.warn(...args),
+  error: (...args: unknown[]) => {
+    if (args.some((arg) => isMissingReleaseFeedError(arg))) {
+      log.warn("[updater] No published release feed is available yet; skipping update check");
+      return;
+    }
+
+    log.error(...args);
+  },
+};
+
+// Route autoUpdater logs through electron-log, but downgrade the expected
+// GitHub 404 feed miss until a release feed actually exists.
+autoUpdater.logger = updaterLogger as typeof log;
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
@@ -62,15 +76,20 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
   });
 
   autoUpdater.on("error", (err) => {
+    if (isMissingReleaseFeedError(err)) {
+      sendStatus(mainWindow, "up-to-date");
+      return;
+    }
+
     log.error("[updater] Error:", err);
     sendStatus(mainWindow, "error");
   });
 
   // Initial check, then every 4 hours
-  autoUpdater.checkForUpdates();
+  void checkForUpdatesSafely(mainWindow);
   setInterval(
     () => {
-      autoUpdater.checkForUpdates();
+      void checkForUpdatesSafely(mainWindow);
     },
     4 * 60 * 60 * 1000,
   );
@@ -80,4 +99,37 @@ type UpdateStatus = "checking" | "available" | "up-to-date" | "downloading" | "d
 
 function sendStatus(win: BrowserWindow, status: UpdateStatus, version?: string, percent?: number): void {
   win.webContents.send("update-status", { status, version, percent });
+}
+
+async function checkForUpdatesSafely(mainWindow: BrowserWindow): Promise<void> {
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (err) {
+    if (isMissingReleaseFeedError(err)) {
+      sendStatus(mainWindow, "up-to-date");
+      return;
+    }
+
+    log.error("[updater] Update check failed:", err);
+    sendStatus(mainWindow, "error");
+  }
+}
+
+function isMissingReleaseFeedError(err: unknown): boolean {
+  if (typeof err === "string") {
+    return err.includes("releases.atom") && err.includes("404");
+  }
+
+  if (!err || typeof err !== "object") {
+    return false;
+  }
+
+  const maybeHttpError = err as { statusCode?: number; message?: string; stack?: string };
+  return (
+    maybeHttpError.statusCode === 404 &&
+    (
+      (typeof maybeHttpError.message === "string" && maybeHttpError.message.includes("releases.atom")) ||
+      (typeof maybeHttpError.stack === "string" && maybeHttpError.stack.includes("releases.atom"))
+    )
+  );
 }

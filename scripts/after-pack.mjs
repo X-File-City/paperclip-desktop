@@ -1,6 +1,18 @@
 import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { existsSync, readdirSync, lstatSync, readlinkSync, rmSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  openSync,
+  readSync,
+  readdirSync,
+  readlinkSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 
 /**
  * afterPack hook: ad-hoc sign the macOS .app bundle with entitlements.
@@ -36,23 +48,80 @@ function removeBrokenSymlinks(dir) {
   }
 }
 
-/** Recursively sign all Mach-O binaries and dylibs in a directory (skips symlinks). */
-function signAllBinaries(dir, signFn) {
-  if (!existsSync(dir)) return;
+const MACH_O_MAGICS = new Set([
+  "feedface",
+  "cefaedfe",
+  "feedfacf",
+  "cffaedfe",
+  "cafebabe",
+  "bebafeca",
+  "cafebabf",
+  "bfbafeca",
+]);
+
+function isMachOBinary(full) {
+  let fd;
+  try {
+    fd = openSync(full, "r");
+    const header = Buffer.alloc(4);
+    const bytesRead = readSync(fd, header, 0, header.length, 0);
+    if (bytesRead < header.length) return false;
+    return MACH_O_MAGICS.has(header.toString("hex"));
+  } catch {
+    return false;
+  } finally {
+    if (typeof fd === "number") {
+      try { closeSync(fd); } catch { /* best-effort */ }
+    }
+  }
+}
+
+function collectSignableBinaries(dir, out = []) {
+  if (!existsSync(dir)) return out;
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     let stat;
     try { stat = lstatSync(full); } catch { continue; }
     if (stat.isSymbolicLink()) continue;
     if (stat.isDirectory()) {
-      signAllBinaries(full, signFn);
-    } else if (
-      entry.endsWith(".dylib") ||
-      // Sign executable binaries (no extension, executable bit set)
-      (!entry.includes(".") && (stat.mode & 0o111))
-    ) {
-      signFn(full);
+      collectSignableBinaries(full, out);
+      continue;
     }
+    const looksNativeBinary = (
+      entry.endsWith(".dylib") ||
+      entry.endsWith(".node") ||
+      (stat.mode & 0o111)
+    );
+    if (!looksNativeBinary || !isMachOBinary(full)) continue;
+    out.push(full);
+  }
+  return out;
+}
+
+/** Recursively sign all Mach-O binaries and dylibs in a directory (skips symlinks). */
+function signAllBinaries(dir, signFn) {
+  const signable = collectSignableBinaries(dir).sort((a, b) => {
+    const aPriority = (a.endsWith(".dylib") || a.endsWith(".node")) ? 0 : 1;
+    const bPriority = (b.endsWith(".dylib") || b.endsWith(".node")) ? 0 : 1;
+    if (aPriority !== bPriority) return aPriority - bPriority;
+    const aDepth = a.split("/").length;
+    const bDepth = b.split("/").length;
+    return bDepth - aDepth;
+  });
+  for (const target of signable) {
+    signFn(target);
+  }
+}
+
+function extractEntitlements(target) {
+  try {
+    const output = execFileSync("codesign", ["-d", "--entitlements", ":-", target], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return output.startsWith("<?xml") ? output : null;
+  } catch {
+    return null;
   }
 }
 
@@ -91,14 +160,33 @@ export default async function afterPack(context) {
 
   // All components must use --options runtime so macOS library validation
   // sees a consistent signing identity (ad-hoc + hardened runtime everywhere).
+  const signingIdentity = (
+    process.env.APPLE_CODESIGN_IDENTITY?.trim() ||
+    process.env.CSC_NAME?.trim() ||
+    "-"
+  );
+  const tempDir = mkdtempSync(join(tmpdir(), "paperclip-codesign-"));
+  let entitlementsFileCounter = 0;
+
   const sign = (target, opts = []) => {
-    const args = ["--force", "--options", "runtime", "--sign", "-", ...opts, target];
+    const args = ["--force", "--options", "runtime", "--sign", signingIdentity, ...opts, target];
     console.log(`[after-pack]   codesign ${target}`);
     execFileSync("codesign", args, { stdio: "inherit" });
   };
 
   const signWithEntitlements = (target) =>
     sign(target, ["--entitlements", entitlements]);
+
+  const signPreservingEntitlements = (target) => {
+    const existingEntitlements = extractEntitlements(target);
+    if (!existingEntitlements) {
+      sign(target);
+      return;
+    }
+    const entitlementsPath = join(tempDir, `${entitlementsFileCounter++}.plist`);
+    writeFileSync(entitlementsPath, `${existingEntitlements}\n`, "utf8");
+    sign(target, ["--entitlements", entitlementsPath]);
+  };
 
   // 1. Sign helper apps (sign their internal binaries first, then the .app)
   console.log(`[after-pack] Signing helper apps...`);
@@ -164,7 +252,20 @@ export default async function afterPack(context) {
     }
   }
 
-  // 5. Sign the main app binary and bundle last
+  // 5. Re-sign bundled runtime binaries in Resources so macOS sees the app
+  //    and its helper executables as one coherent code-signed product.
+  console.log(`[after-pack] Signing bundled runtime binaries...`);
+  signAllBinaries(join(appPath, "Contents", "Resources", "app-server"), signPreservingEntitlements);
+
+  // 5b. Some macOS versions re-apply com.apple.provenance xattrs while
+  //     signing nested content. Strip xattrs again before signing the
+  //     outer app bundle or codesign rejects it as containing detritus.
+  console.log(`[after-pack] Stripping extended attributes before final app signing...`);
+  execFileSync("sh", ["-c",
+    `find "${appPath}" ! -type l -print0 | xargs -0 -n 200 xattr -c 2>/dev/null; true`
+  ]);
+
+  // 6. Sign the main app binary and bundle last
   console.log(`[after-pack] Signing main app...`);
   signWithEntitlements(appPath);
 
@@ -174,5 +275,7 @@ export default async function afterPack(context) {
     console.log(`[after-pack] Signature verified successfully.`);
   } catch (e) {
     console.warn(`[after-pack] WARNING: Signature verification failed: ${e.message}`);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
   }
 }
