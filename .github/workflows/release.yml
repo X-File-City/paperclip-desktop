@@ -28,9 +28,15 @@ concurrency:
 
 jobs:
   build-mac:
-    name: Build macOS release
+    name: Build macOS ${{ matrix.arch }} release
     runs-on: macos-latest
     environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - x64
+          - arm64
     env:
       RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
       PAPERCLIP_REQUIRE_MACOS_RELEASE_SIGNING: "1"
@@ -130,7 +136,8 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: pnpm exec electron-builder --mac --publish never
+          PAPERCLIP_NOTARY_TIMEOUT_MS: "2700000"
+        run: pnpm exec electron-builder --mac --${{ matrix.arch }} --publish never
 
       - name: Notarize and staple DMG artifacts
         env:
@@ -164,7 +171,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: release-mac
+          name: release-mac-${{ matrix.arch }}
           path: |
             release/*.dmg
             release/*.zip
