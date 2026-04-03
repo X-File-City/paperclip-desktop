@@ -97,6 +97,7 @@ nsis:
 linux:
   icon: build/icon.png
   category: Development
+  maintainer: Aron Prins
   executableName: paperclip
   artifactName: "Paperclip-${version}-${arch}.${ext}"
   target:
