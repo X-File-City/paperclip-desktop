@@ -68,11 +68,23 @@ jobs:
           CERT_PATH="$RUNNER_TEMP/paperclip-signing.p12"
           API_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
           KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          export CERT_PATH API_KEY_PATH
 
           echo "::add-mask::$KEYCHAIN_PASSWORD"
 
-          printf '%s' "$MAC_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_PATH"
-          printf '%s' "$APPLE_API_KEY_P8" > "$API_KEY_PATH"
+          python - <<'PY'
+import base64
+import os
+from pathlib import Path
+
+raw = "".join(os.environ["MAC_CERTIFICATE_P12_BASE64"].split())
+Path(os.environ["CERT_PATH"]).write_bytes(base64.b64decode(raw))
+
+api_key = os.environ["APPLE_API_KEY_P8"]
+if "\\n" in api_key and "\n" not in api_key:
+    api_key = api_key.replace("\\n", "\n")
+Path(os.environ["API_KEY_PATH"]).write_text(api_key, encoding="utf-8")
+PY
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
@@ -155,8 +167,10 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          security delete-keychain "$KEYCHAIN_PATH" || true
-          rm -f "$CERT_PATH" "$API_KEY_PATH"
+          if [ -n "${KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
+          rm -f "${CERT_PATH:-}" "${API_KEY_PATH:-}"
 
   build-linux:
     name: Build Linux release
