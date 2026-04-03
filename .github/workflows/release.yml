@@ -68,6 +68,7 @@ jobs:
           CERT_PATH="$RUNNER_TEMP/paperclip-signing.p12"
           API_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
           KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          CSC_NAME_NORMALIZED="${APPLE_CODESIGN_IDENTITY#Developer ID Application: }"
           export CERT_PATH API_KEY_PATH
 
           echo "::add-mask::$KEYCHAIN_PASSWORD"
@@ -108,7 +109,7 @@ jobs:
           {
             echo "APPLE_API_KEY=$API_KEY_PATH"
             echo "CSC_KEYCHAIN=$KEYCHAIN_PATH"
-            echo "CSC_NAME=$APPLE_CODESIGN_IDENTITY"
+            echo "CSC_NAME=$CSC_NAME_NORMALIZED"
             echo "KEYCHAIN_PATH=$KEYCHAIN_PATH"
             echo "CERT_PATH=$CERT_PATH"
             echo "API_KEY_PATH=$API_KEY_PATH"
