@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 function requireEnv(name) {
@@ -41,83 +42,94 @@ export default async function afterSign(context) {
   const submitLogPath = join(logDir, `${basename(context.appOutDir)}-app.submit.json`);
   const timeoutMs = Number.parseInt(process.env.PAPERCLIP_NOTARY_TIMEOUT_MS || "", 10) || 45 * 60 * 1000;
   const pollIntervalMs = Number.parseInt(process.env.PAPERCLIP_NOTARY_POLL_INTERVAL_MS || "", 10) || 30 * 1000;
+  const stagingDir = mkdtempSync(join(tmpdir(), "paperclip-notary-"));
+  const archivePath = join(stagingDir, `${context.packager.appInfo.productFilename}.zip`);
 
   mkdirSync(logDir, { recursive: true });
 
-  console.log(`[after-sign] Submitting ${appPath} for notarization...`);
-  const submitOutput = execFileSync(
-    "xcrun",
-    [
-      "notarytool",
-      "submit",
-      appPath,
-      "--key",
-      requireEnv("APPLE_API_KEY"),
-      "--key-id",
-      requireEnv("APPLE_API_KEY_ID"),
-      "--issuer",
-      requireEnv("APPLE_API_ISSUER"),
-      "--no-wait",
-      "--output-format",
-      "json",
-    ],
-    { encoding: "utf8" },
-  );
+  try {
+    console.log(`[after-sign] Creating notarization archive for ${appPath}...`);
+    execFileSync("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", appPath, archivePath], {
+      stdio: "inherit",
+    });
 
-  writeFileSync(submitLogPath, submitOutput.endsWith("\n") ? submitOutput : `${submitOutput}\n`, "utf8");
-
-  const submitted = JSON.parse(submitOutput);
-  const submissionId = readSubmissionId(submitted);
-  if (!submissionId) {
-    throw new Error(`Unable to determine notarization submission id for ${appPath}.`);
-  }
-
-  console.log(`[after-sign] Notarization submission id: ${submissionId}`);
-
-  const startedAt = Date.now();
-  let finalInfo = null;
-
-  while (Date.now() - startedAt < timeoutMs) {
-    await sleep(pollIntervalMs);
-
-    const infoOutput = execFileSync(
+    console.log(`[after-sign] Submitting ${archivePath} for notarization...`);
+    const submitOutput = execFileSync(
       "xcrun",
       [
         "notarytool",
-        "info",
-        submissionId,
+        "submit",
+        archivePath,
         "--key",
         requireEnv("APPLE_API_KEY"),
         "--key-id",
         requireEnv("APPLE_API_KEY_ID"),
         "--issuer",
         requireEnv("APPLE_API_ISSUER"),
+        "--no-wait",
         "--output-format",
         "json",
       ],
       { encoding: "utf8" },
     );
 
-    finalInfo = JSON.parse(infoOutput);
-    writeFileSync(logPath, infoOutput.endsWith("\n") ? infoOutput : `${infoOutput}\n`, "utf8");
-    console.log(`[after-sign] Notarization status for ${basename(appPath)}: ${finalInfo.status}`);
+    writeFileSync(submitLogPath, submitOutput.endsWith("\n") ? submitOutput : `${submitOutput}\n`, "utf8");
 
-    if (finalInfo.status === "Accepted") {
-      break;
+    const submitted = JSON.parse(submitOutput);
+    const submissionId = readSubmissionId(submitted);
+    if (!submissionId) {
+      throw new Error(`Unable to determine notarization submission id for ${appPath}.`);
     }
 
-    if (finalInfo.status === "Invalid" || finalInfo.status === "Rejected") {
-      throw new Error(`Apple notarization failed for ${appPath}: ${finalInfo.status}`);
+    console.log(`[after-sign] Notarization submission id: ${submissionId}`);
+
+    const startedAt = Date.now();
+    let finalInfo = null;
+
+    while (Date.now() - startedAt < timeoutMs) {
+      await sleep(pollIntervalMs);
+
+      const infoOutput = execFileSync(
+        "xcrun",
+        [
+          "notarytool",
+          "info",
+          submissionId,
+          "--key",
+          requireEnv("APPLE_API_KEY"),
+          "--key-id",
+          requireEnv("APPLE_API_KEY_ID"),
+          "--issuer",
+          requireEnv("APPLE_API_ISSUER"),
+          "--output-format",
+          "json",
+        ],
+        { encoding: "utf8" },
+      );
+
+      finalInfo = JSON.parse(infoOutput);
+      writeFileSync(logPath, infoOutput.endsWith("\n") ? infoOutput : `${infoOutput}\n`, "utf8");
+      console.log(`[after-sign] Notarization status for ${basename(appPath)}: ${finalInfo.status}`);
+
+      if (finalInfo.status === "Accepted") {
+        break;
+      }
+
+      if (finalInfo.status === "Invalid" || finalInfo.status === "Rejected") {
+        throw new Error(`Apple notarization failed for ${appPath}: ${finalInfo.status}`);
+      }
     }
-  }
 
-  if (!finalInfo || finalInfo.status !== "Accepted") {
-    throw new Error(
-      `Timed out waiting for Apple notarization of ${appPath} after ${Math.round(timeoutMs / 60000)} minute(s).`,
-    );
-  }
+    if (!finalInfo || finalInfo.status !== "Accepted") {
+      throw new Error(
+        `Timed out waiting for Apple notarization of ${appPath} after ${Math.round(timeoutMs / 60000)} minute(s).`,
+      );
+    }
 
-  console.log(`[after-sign] Stapling notarization ticket to ${appPath}...`);
-  execFileSync("xcrun", ["stapler", "staple", "-v", appPath], { stdio: "inherit" });
-  execFileSync("xcrun", ["stapler", "validate", "-v", appPath], { stdio: "inherit" });
+    console.log(`[after-sign] Stapling notarization ticket to ${appPath}...`);
+    execFileSync("xcrun", ["stapler", "staple", "-v", appPath], { stdio: "inherit" });
+    execFileSync("xcrun", ["stapler", "validate", "-v", appPath], { stdio: "inherit" });
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true });
+  }
 }

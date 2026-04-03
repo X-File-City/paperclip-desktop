@@ -60,8 +60,14 @@ mac:
         - arm64
   hardenedRuntime: true
   gatekeeperAssess: false
+  notarize: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.inherit.plist
+  signIgnore:
+    - "/Contents/Resources/app-server/.*"
+    - "\\.pak$"
+    - "\\.bin$"
+    - "\\.dat$"
 
 dmg:
   contents:
