@@ -73,18 +73,18 @@ jobs:
           echo "::add-mask::$KEYCHAIN_PASSWORD"
 
           python - <<'PY'
-import base64
-import os
-from pathlib import Path
+          import base64
+          import os
+          from pathlib import Path
 
-raw = "".join(os.environ["MAC_CERTIFICATE_P12_BASE64"].split())
-Path(os.environ["CERT_PATH"]).write_bytes(base64.b64decode(raw))
+          raw = "".join(os.environ["MAC_CERTIFICATE_P12_BASE64"].split())
+          Path(os.environ["CERT_PATH"]).write_bytes(base64.b64decode(raw))
 
-api_key = os.environ["APPLE_API_KEY_P8"]
-if "\\n" in api_key and "\n" not in api_key:
-    api_key = api_key.replace("\\n", "\n")
-Path(os.environ["API_KEY_PATH"]).write_text(api_key, encoding="utf-8")
-PY
+          api_key = os.environ["APPLE_API_KEY_P8"]
+          if "\\n" in api_key and "\n" not in api_key:
+              api_key = api_key.replace("\\n", "\n")
+          Path(os.environ["API_KEY_PATH"]).write_text(api_key, encoding="utf-8")
+          PY
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
