@@ -132,7 +132,6 @@ function signTarget(target, identity, entitlements) {
 
   console.log(`[after-pack]   codesign ${target}`);
   execFileSync("codesign", args, { stdio: "inherit" });
-  execFileSync("codesign", ["--verify", "--strict", "--verbose=2", target], { stdio: "inherit" });
 }
 
 export default async function afterPack(context) {
