@@ -1,16 +1,22 @@
 #!/usr/bin/env node
 
 /**
- * Installs @paperclipai/server from npm into a staging directory, then
- * assembles the server bundle that electron-builder packages into the app.
- *
- * Replaces the old pnpm-deploy-based approach from the monorepo.
+ * Installs @paperclipai/server from npm into per-architecture staging
+ * directories, then assembles the server bundle that electron-builder packages
+ * into the app.
  */
 
 import { execSync } from "node:child_process";
 import {
-  rmSync, existsSync, readdirSync, readFileSync, writeFileSync,
-  lstatSync, symlinkSync, realpathSync, mkdirSync, cpSync,
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,10 +24,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 
-const stagingDir = path.join(projectRoot, "build", "server-staging");
-const bundleDir = path.join(projectRoot, "build", "server-bundle");
-
-// ── Read the target server version from package.json ────────────────────────
+const stagingRootDir = path.join(projectRoot, "build", "server-staging");
+const bundleRootDir = path.join(projectRoot, "build", "server-bundle");
 
 const projectPkg = JSON.parse(readFileSync(path.join(projectRoot, "package.json"), "utf8"));
 const serverVersion = projectPkg.devDependencies["@paperclipai/server"];
@@ -32,100 +36,159 @@ if (!serverVersion) {
 
 console.log(`[prepare-server] Target server version: @paperclipai/server@${serverVersion}`);
 
-// ── Step 1: Install @paperclipai/server into a staging directory ────────────
+const platform = process.platform;
+const nodePlatform = platform === "win32" ? "win32" : platform;
+const ebPlatform = platform === "darwin" ? "mac" : platform === "win32" ? "win" : "linux";
+const targetArches = platform === "darwin" ? ["x64", "arm64"] : ["x64"];
 
-console.log("[prepare-server] Installing @paperclipai/server from npm...");
+rmSync(stagingRootDir, { recursive: true, force: true });
+rmSync(bundleRootDir, { recursive: true, force: true });
 
-if (existsSync(stagingDir)) {
-  rmSync(stagingDir, { recursive: true, force: true });
-}
-if (existsSync(bundleDir)) {
-  rmSync(bundleDir, { recursive: true, force: true });
-}
+mkdirSync(stagingRootDir, { recursive: true });
+mkdirSync(bundleRootDir, { recursive: true });
 
-mkdirSync(stagingDir, { recursive: true });
+function fixDylibSymlinks(libDir) {
+  if (!existsSync(libDir)) return;
 
-// Write a minimal package.json for the staging install
-writeFileSync(
-  path.join(stagingDir, "package.json"),
-  JSON.stringify({ private: true, dependencies: { "@paperclipai/server": serverVersion } }, null, 2),
-);
+  for (const file of readdirSync(libDir)) {
+    const match = file.match(/^(lib[^.]+)\.(\d+)(\.\d+)+\.dylib$/);
+    if (!match) continue;
 
-execSync("npm install --production", { cwd: stagingDir, stdio: "inherit" });
+    const base = match[1];
+    const major = match[2];
 
-// ── Step 2: Assemble the server bundle ──────────────────────────────────────
+    for (const alias of [`${base}.${major}.dylib`, `${base}.dylib`]) {
+      const aliasPath = path.join(libDir, alias);
+      try {
+        lstatSync(aliasPath);
+        rmSync(aliasPath, { force: true });
+      } catch {
+        // ignore missing alias
+      }
 
-console.log("[prepare-server] Assembling server bundle...");
-
-const serverPkgDir = path.join(stagingDir, "node_modules", "@paperclipai", "server");
-const bundleServerDir = path.join(bundleDir, "server");
-
-mkdirSync(bundleServerDir, { recursive: true });
-
-// Copy server dist/ and package.json
-cpSync(path.join(serverPkgDir, "dist"), path.join(bundleServerDir, "dist"), { recursive: true });
-cpSync(path.join(serverPkgDir, "package.json"), path.join(bundleServerDir, "package.json"));
-
-// Copy skills/ if present
-const skillsSrc = path.join(serverPkgDir, "skills");
-if (existsSync(skillsSrc)) {
-  cpSync(skillsSrc, path.join(bundleServerDir, "skills"), { recursive: true });
+      symlinkSync(file, aliasPath);
+      console.log(`[prepare-server]   ${alias} -> ${file}`);
+    }
+  }
 }
 
-// Copy entire node_modules (the server's runtime dependencies)
-cpSync(path.join(stagingDir, "node_modules"), path.join(bundleServerDir, "node_modules"), { recursive: true });
+function removeFinderDuplicates(rootDir) {
+  function* walkDir(dir) {
+    for (const entry of readdirSync(dir)) {
+      const full = path.join(dir, entry);
 
-console.log("[prepare-server] Server bundle assembled.");
+      let stat;
+      try {
+        stat = lstatSync(full);
+      } catch {
+        continue;
+      }
 
-// ── Step 3: Fix macOS dylib soname symlinks for embedded-postgres ───────────
-// npm creates absolute symlinks (e.g. libzstd.1.dylib -> /abs/path/libzstd.1.5.7.dylib)
-// that break when the staging dir is deleted or the app is relocated.
-// We must ensure all dylib symlinks are RELATIVE so they survive packaging.
-
-if (process.platform === "darwin") {
-  console.log("[prepare-server] Fixing dylib symlinks for embedded-postgres...");
-
-  /** Ensure all dylib soname/bare symlinks in a lib dir are relative. */
-  function fixDylibSymlinks(libDir) {
-    if (!existsSync(libDir)) return;
-    for (const file of readdirSync(libDir)) {
-      // Match versioned dylibs: libfoo.A.B.C.dylib or libfoo.A.B.dylib
-      const m = file.match(/^(lib[^.]+)\.(\d+)(\.\d+)+\.dylib$/);
-      if (!m) continue;
-      const base = m[1]; // e.g. libzstd
-      const major = m[2]; // e.g. 1
-
-      for (const alias of [`${base}.${major}.dylib`, `${base}.dylib`]) {
-        const aliasPath = path.join(libDir, alias);
-        // Remove any existing symlink (may be absolute / broken)
-        try { lstatSync(aliasPath); rmSync(aliasPath, { force: true }); } catch { /* doesn't exist */ }
-        // Create a relative symlink: libzstd.1.dylib -> libzstd.1.5.7.dylib
-        symlinkSync(file, aliasPath);
-        console.log(`[prepare-server]   ${alias} -> ${file}`);
+      if (stat.isSymbolicLink()) continue;
+      if (stat.isDirectory()) {
+        yield* walkDir(full);
+      } else {
+        yield full;
       }
     }
   }
 
-  const nmDir = path.join(bundleServerDir, "node_modules");
-  const embeddedPgScope = path.join(nmDir, "@embedded-postgres");
-
-  if (existsSync(embeddedPgScope)) {
-    for (const arch of readdirSync(embeddedPgScope)) {
-      const libDir = path.join(embeddedPgScope, arch, "native", "lib");
-      fixDylibSymlinks(libDir);
+  const duplicates = [];
+  for (const file of walkDir(rootDir)) {
+    const base = path.basename(file);
+    if (/ \d+(\.[^/]+)?$/.test(base) && / \d+/.test(base)) {
+      duplicates.push(file);
     }
+  }
+
+  if (duplicates.length === 0) {
+    console.log("[prepare-server] No Finder duplicates found.");
+    return;
+  }
+
+  console.warn(`[prepare-server] WARNING: found ${duplicates.length} Finder duplicate file(s). Removing them now.`);
+  for (const file of duplicates) {
+    rmSync(file, { force: true });
+    console.warn(`[prepare-server]   removed: ${path.relative(rootDir, file)}`);
   }
 }
 
-// ── Step 4: Download bundled Node.js binaries ───────────────────────────────
+function validateMigrations(bundleServerDir) {
+  const migrationsDir = path.join(
+    bundleServerDir,
+    "node_modules",
+    "@paperclipai",
+    "db",
+    "dist",
+    "migrations",
+  );
+
+  if (!existsSync(migrationsDir)) {
+    console.error(`[prepare-server] ERROR: Migrations directory not found at ${migrationsDir}`);
+    process.exit(1);
+  }
+
+  const sqlFiles = readdirSync(migrationsDir).filter((file) => file.endsWith(".sql")).sort();
+  console.log(`[prepare-server] Migration files validated: ${sqlFiles.length} SQL file(s) present.`);
+  if (sqlFiles.length === 0) {
+    console.error("[prepare-server] ERROR: No migration SQL files found in @paperclipai/db. The app will fail to initialise the database.");
+    process.exit(1);
+  }
+}
+
+for (const arch of targetArches) {
+  const variant = `${ebPlatform}-${arch}`;
+  const stagingDir = path.join(stagingRootDir, variant);
+  const bundleDir = path.join(bundleRootDir, variant);
+  const bundleServerDir = path.join(bundleDir, "server");
+
+  console.log(`[prepare-server] Installing runtime bundle for ${variant}...`);
+
+  mkdirSync(stagingDir, { recursive: true });
+  writeFileSync(
+    path.join(stagingDir, "package.json"),
+    JSON.stringify({ private: true, dependencies: { "@paperclipai/server": serverVersion } }, null, 2),
+  );
+
+  execSync(
+    `npm install --production --os=${nodePlatform} --cpu=${arch}`,
+    { cwd: stagingDir, stdio: "inherit" },
+  );
+
+  console.log(`[prepare-server] Assembling server bundle for ${variant}...`);
+  mkdirSync(bundleServerDir, { recursive: true });
+
+  const serverPkgDir = path.join(stagingDir, "node_modules", "@paperclipai", "server");
+
+  cpSync(path.join(serverPkgDir, "dist"), path.join(bundleServerDir, "dist"), { recursive: true });
+  cpSync(path.join(serverPkgDir, "package.json"), path.join(bundleServerDir, "package.json"));
+
+  const skillsSrc = path.join(serverPkgDir, "skills");
+  if (existsSync(skillsSrc)) {
+    cpSync(skillsSrc, path.join(bundleServerDir, "skills"), { recursive: true });
+  }
+
+  cpSync(path.join(stagingDir, "node_modules"), path.join(bundleServerDir, "node_modules"), { recursive: true });
+
+  if (platform === "darwin") {
+    console.log(`[prepare-server] Fixing dylib symlinks for ${variant} embedded-postgres...`);
+    const embeddedPgScope = path.join(bundleServerDir, "node_modules", "@embedded-postgres");
+    if (existsSync(embeddedPgScope)) {
+      for (const pkgArch of readdirSync(embeddedPgScope)) {
+        const libDir = path.join(embeddedPgScope, pkgArch, "native", "lib");
+        fixDylibSymlinks(libDir);
+      }
+    }
+  }
+
+  console.log(`[prepare-server] Scanning ${variant} bundle for Finder duplicate files...`);
+  removeFinderDuplicates(bundleDir);
+  validateMigrations(bundleServerDir);
+}
 
 const NODE_VERSION = "v22.15.0";
-const platform = process.platform;
-
-const nodePlatform = platform === "win32" ? "win" : platform;
-const ebPlatform = platform === "darwin" ? "mac" : platform === "win32" ? "win" : "linux";
 const arches = platform === "darwin" ? ["x64", "arm64"] : ["x64"];
-
+const nodeDownloadPlatform = platform === "win32" ? "win" : platform;
 const nodeBinDir = path.join(projectRoot, "build", "node-bin");
 
 for (const arch of arches) {
@@ -140,11 +203,11 @@ for (const arch of arches) {
   mkdirSync(destDir, { recursive: true });
 
   const ext = platform === "win32" ? "zip" : "tar.gz";
-  const archiveName = `node-${NODE_VERSION}-${nodePlatform}-${arch}`;
+  const archiveName = `node-${NODE_VERSION}-${nodeDownloadPlatform}-${arch}`;
   const url = `https://nodejs.org/dist/${NODE_VERSION}/${archiveName}.${ext}`;
   const archivePath = path.join(destDir, `node.${ext}`);
 
-  console.log(`[prepare-server] Downloading Node ${NODE_VERSION} for ${nodePlatform}-${arch}...`);
+  console.log(`[prepare-server] Downloading Node ${NODE_VERSION} for ${nodeDownloadPlatform}-${arch}...`);
 
   if (platform === "win32") {
     execSync(`powershell -Command "Invoke-WebRequest -Uri '${url}' -OutFile '${archivePath}'"`, { stdio: "inherit" });
@@ -164,62 +227,7 @@ for (const arch of arches) {
   console.log(`[prepare-server] Node ${NODE_VERSION} ${arch} ready at ${destBin}`);
 }
 
-// ── Step 5: Remove macOS Finder duplicate files ─────────────────────────────
-
-console.log("[prepare-server] Scanning for macOS Finder duplicate files...");
-{
-  function* walkDir(dir) {
-    for (const entry of readdirSync(dir)) {
-      const full = path.join(dir, entry);
-      let stat;
-      try { stat = lstatSync(full); } catch { continue; }
-      if (stat.isSymbolicLink()) continue;
-      if (stat.isDirectory()) { yield* walkDir(full); } else { yield full; }
-    }
-  }
-
-  const dupes = [];
-  for (const file of walkDir(bundleDir)) {
-    const base = path.basename(file);
-    if (/ \d+(\.[^/]+)?$/.test(base) && / \d+/.test(base)) {
-      dupes.push(file);
-    }
-  }
-
-  if (dupes.length > 0) {
-    console.warn(`[prepare-server] WARNING: found ${dupes.length} Finder duplicate file(s). Removing them now.`);
-    for (const f of dupes) {
-      rmSync(f, { force: true });
-      console.warn(`[prepare-server]   removed: ${path.relative(bundleDir, f)}`);
-    }
-  } else {
-    console.log("[prepare-server] No Finder duplicates found.");
-  }
-}
-
-// ── Step 6: Validate migration files ────────────────────────────────────────
-
-{
-  const migrationsDir = path.join(
-    bundleServerDir, "node_modules", "@paperclipai", "db", "dist", "migrations",
-  );
-
-  if (existsSync(migrationsDir)) {
-    const sqlFiles = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
-    console.log(`[prepare-server] Migration files validated: ${sqlFiles.length} SQL file(s) present.`);
-    if (sqlFiles.length === 0) {
-      console.error("[prepare-server] ERROR: No migration SQL files found in @paperclipai/db. The app will fail to initialise the database.");
-      process.exit(1);
-    }
-  } else {
-    console.error(`[prepare-server] ERROR: Migrations directory not found at ${migrationsDir}`);
-    process.exit(1);
-  }
-}
-
-// ── Cleanup staging dir ─────────────────────────────────────────────────────
-
-console.log("[prepare-server] Cleaning up staging directory...");
-rmSync(stagingDir, { recursive: true, force: true });
+console.log("[prepare-server] Cleaning up staging directories...");
+rmSync(stagingRootDir, { recursive: true, force: true });
 
 console.log("[prepare-server] Done.");
