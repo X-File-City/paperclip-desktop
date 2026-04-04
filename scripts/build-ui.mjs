@@ -12,19 +12,37 @@
  */
 
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, mkdirSync, rmSync, cpSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, rmSync, cpSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 
-const bundleUiDist = path.join(projectRoot, "build", "server-bundle", "server", "ui-dist");
+const bundleRootDir = path.join(projectRoot, "build", "server-bundle");
 const cloneDir = path.join(projectRoot, "build", "upstream-clone");
+
+function getBundleUiDistDirs() {
+  if (!existsSync(bundleRootDir)) return [];
+  return readdirSync(bundleRootDir)
+    .map((variant) => path.join(bundleRootDir, variant, "server", "ui-dist"))
+    .filter((dir) => existsSync(path.dirname(dir)));
+}
+
+function copyUiDistToBundles(uiDist) {
+  for (const bundleUiDist of getBundleUiDistDirs()) {
+    mkdirSync(bundleUiDist, { recursive: true });
+    cpSync(uiDist, bundleUiDist, { recursive: true });
+  }
+}
 
 // ── Check if UI is already built ────────────────────────────────────────────
 
-if (existsSync(path.join(bundleUiDist, "index.html"))) {
+const bundleUiDistDirs = getBundleUiDistDirs();
+if (
+  bundleUiDistDirs.length > 0 &&
+  bundleUiDistDirs.every((dir) => existsSync(path.join(dir, "index.html")))
+) {
   console.log("[build-ui] UI already present in server bundle, skipping.");
   process.exit(0);
 }
@@ -53,13 +71,14 @@ try {
     mkdirSync(uiStagingDir, { recursive: true });
     execSync(`npm pack @paperclipai/ui@${uiVersion} --pack-destination "${uiStagingDir}"`, { stdio: "inherit" });
     // Extract and copy dist/
-    const tarballs = execSync(`ls "${uiStagingDir}"/*.tgz`, { encoding: "utf8" }).trim().split("\n");
+    const tarballs = readdirSync(uiStagingDir)
+      .filter((entry) => entry.endsWith(".tgz"))
+      .map((entry) => path.join(uiStagingDir, entry));
     if (tarballs[0]) {
       execSync(`tar -xzf "${tarballs[0]}" -C "${uiStagingDir}"`, { stdio: "inherit" });
       const uiDist = path.join(uiStagingDir, "package", "dist");
       if (existsSync(path.join(uiDist, "index.html"))) {
-        mkdirSync(bundleUiDist, { recursive: true });
-        cpSync(uiDist, bundleUiDist, { recursive: true });
+        copyUiDistToBundles(uiDist);
         rmSync(uiStagingDir, { recursive: true, force: true });
         console.log("[build-ui] UI installed from npm. Done.");
         process.exit(0);
@@ -118,8 +137,7 @@ if (!existsSync(path.join(uiDist, "index.html"))) {
   process.exit(1);
 }
 
-mkdirSync(bundleUiDist, { recursive: true });
-cpSync(uiDist, bundleUiDist, { recursive: true });
+copyUiDistToBundles(uiDist);
 
 // ── Cleanup ─────────────────────────────────────────────────────────────────
 

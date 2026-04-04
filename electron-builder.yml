@@ -21,19 +21,19 @@ publish:
 # node_modules comes from build/server-bundle (npm install --production output).
 # dist/ and package.json come from the published @paperclipai/server npm package.
 extraResources:
-  - from: build/server-bundle/server/dist
+  - from: build/server-bundle/${os}-${arch}/server/dist
     to: app-server/server/dist
     filter:
       - "**/*"
-  - from: build/server-bundle/server/ui-dist
+  - from: build/server-bundle/${os}-${arch}/server/ui-dist
     to: app-server/server/ui-dist
     filter:
       - "**/*"
-  - from: build/server-bundle/server/node_modules
+  - from: build/server-bundle/${os}-${arch}/server/node_modules
     to: app-server/server/node_modules
     filter:
       - "**/*"
-  - from: build/server-bundle/server/package.json
+  - from: build/server-bundle/${os}-${arch}/server/package.json
     to: app-server/server/package.json
   # Bundled Node.js binary (arch-specific, selected at build time)
   - from: "build/node-bin/${os}-${arch}"
@@ -44,14 +44,11 @@ extraResources:
 # ─── macOS ───────────────────────────────────────────────────────────────────
 
 afterPack: scripts/after-pack.mjs
+afterSign: scripts/after-sign.mjs
 
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.png
-  # Signing is handled entirely by afterPack (scripts/after-pack.mjs).
-  # Setting identity to null prevents electron-builder from attempting its own
-  # signing pass, which would conflict with afterPack's signatures (Team ID mismatch).
-  identity: null
   target:
     - target: dmg
       arch:
@@ -63,11 +60,16 @@ mac:
         - arm64
   hardenedRuntime: true
   gatekeeperAssess: false
+  notarize: false
   entitlements: build/entitlements.mac.plist
-  entitlementsInherit: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  signIgnore:
+    - "/Contents/Resources/app-server/.*"
+    - "\\.pak$"
+    - "\\.bin$"
+    - "\\.dat$"
 
 dmg:
-  sign: false
   contents:
     - x: 130
       y: 220
@@ -101,6 +103,7 @@ nsis:
 linux:
   icon: build/icon.png
   category: Development
+  maintainer: Aron Prins
   executableName: paperclip
   artifactName: "Paperclip-${version}-${arch}.${ext}"
   target:
