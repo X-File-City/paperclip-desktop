@@ -1,0 +1,121 @@
+name: Submit macOS Release for Notarization
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: GitHub release tag to submit
+        required: true
+        default: v1.0.0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notarize-submit-${{ github.event.inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    name: Submit macOS release assets to Apple
+    runs-on: macos-latest
+    environment: release
+
+    steps:
+      - name: Prepare Apple notarization credentials
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          API_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          export API_KEY_PATH
+
+          python - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          api_key = os.environ["APPLE_API_KEY_P8"]
+          if "\\n" in api_key and "\n" not in api_key:
+              api_key = api_key.replace("\\n", "\n")
+          if "BEGIN PRIVATE KEY" not in api_key:
+              api_key = base64.b64decode("".join(api_key.split())).decode("utf-8")
+          if not api_key.endswith("\n"):
+              api_key += "\n"
+          Path(os.environ["API_KEY_PATH"]).write_text(api_key, encoding="utf-8")
+          PY
+
+          xcrun notarytool history \
+            --key "$API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            >/dev/null
+
+          {
+            echo "APPLE_API_KEY=$API_KEY_PATH"
+            echo "NOTARIZE_TAG=${{ github.event.inputs.tag }}"
+          } >> "$GITHUB_ENV"
+
+      - name: Download macOS release ZIP assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p notarization-input
+          gh release download "${NOTARIZE_TAG}" \
+            --pattern "*-mac.zip" \
+            --dir notarization-input
+
+      - name: Submit x64 and arm64 ZIPs
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p notarization-output
+
+          submit_zip() {
+            local label="$1"
+            local zip_path="$2"
+            local output_path="notarization-output/${label}.submit.json"
+
+            xcrun notarytool submit "$zip_path" \
+              --key "$APPLE_API_KEY" \
+              --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER" \
+              --no-wait \
+              --output-format json > "$output_path"
+          }
+
+          submit_zip "x64" "$(find notarization-input -type f -name 'Paperclip.Desktop-*-mac.zip' ! -name '*arm64*' | head -n 1)"
+          submit_zip "arm64" "$(find notarization-input -type f -name 'Paperclip.Desktop-*-arm64-mac.zip' | head -n 1)"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          lines = ["# Notarization submissions", ""]
+          for label in ("x64", "arm64"):
+              path = Path("notarization-output") / f"{label}.submit.json"
+              payload = json.loads(path.read_text())
+              submission_id = payload.get("id") or payload.get("submissionId") or "unknown"
+              message = payload.get("message") or ""
+              lines.append(f"- {label}: `{submission_id}` {message}".rstrip())
+          Path("notarization-output/summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+          cat notarization-output/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: notarization-submissions-${{ github.event.inputs.tag }}
+          path: notarization-output
+          if-no-files-found: error
+
+      - name: Clean up Apple notarization credentials
+        if: always()
+        run: rm -f "${APPLE_API_KEY:-}"

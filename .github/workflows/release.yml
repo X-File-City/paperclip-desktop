@@ -1,13 +1,10 @@
 name: Release Desktop
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       ref:
-        description: Git ref to build for release verification
+        description: Git ref to build
         required: false
         default: master
       platforms:
@@ -32,7 +29,7 @@ jobs:
     runs-on: macos-latest
     environment: release
     env:
-      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
+      RELEASE_REF: ${{ github.event.inputs.ref || 'master' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -117,7 +114,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.platforms == 'all'
     runs-on: ubuntu-latest
     env:
-      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
+      RELEASE_REF: ${{ github.event.inputs.ref || 'master' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -154,7 +151,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.platforms == 'all'
     runs-on: windows-latest
     env:
-      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
+      RELEASE_REF: ${{ github.event.inputs.ref || 'master' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -188,7 +185,8 @@ jobs:
   publish-release:
     name: Publish GitHub release
     if: |
-      github.event_name == 'push' &&
+      github.event_name == 'workflow_dispatch' &&
+      (startsWith(github.event.inputs.ref, 'v') || startsWith(github.event.inputs.ref, 'refs/tags/v')) &&
       needs.build-mac.result == 'success' &&
       (needs.build-linux.result == 'success' || needs.build-linux.result == 'skipped') &&
       (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped')
@@ -226,7 +224,8 @@ jobs:
             exit 1
           fi
 
-          tag="${GITHUB_REF_NAME}"
+          tag="${{ github.event.inputs.ref }}"
+          tag="${tag#refs/tags/}"
 
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${files[@]}" --clobber
