@@ -18,7 +18,9 @@ paperclip-desktop/
   scripts/
     prepare-server.mjs   Installs @paperclipai/server from npm, bundles node_modules + Node binary
     build-ui.mjs         Clones upstream repo, builds the UI, copies dist into the server bundle
-    after-pack.mjs       electron-builder afterPack hook — macOS ad-hoc signing
+    release-macos-local.mjs  Builds staged local macOS release artifacts per arch
+    after-pack.mjs       Repo-root macOS afterPack hook — requires real signing identity
+    stage-after-pack.mjs Staged macOS afterPack hook — signs nested runtime binaries in app-server
     dev.mjs              Dev script — compiles TS and launches Electron
   build/
     entitlements.mac.plist   macOS hardened runtime entitlements
@@ -32,6 +34,8 @@ paperclip-desktop/
   package.json               Dependencies and scripts
   tsconfig.json              TypeScript configuration
 ```
+
+For the current macOS packaging flow, see `docs-desktop/macos-staged-release.md`.
 
 ## How it works
 
@@ -101,6 +105,28 @@ pnpm build-ui           →  clones upstream repo at matching tag
                             copies ui/dist/ into build/server-bundle/server/ui-dist/
 electron-builder        →  packages everything into .dmg/.exe/.AppImage
 ```
+
+### Staged macOS local release flow
+
+The repo now uses a staged packaging flow for local macOS release work:
+
+```bash
+pnpm release:mac:local:x64
+pnpm release:mac:local:arm64
+```
+
+That flow:
+
+1. Builds the desktop TypeScript, bundled server, and bundled UI
+2. Creates a temporary per-arch stage directory
+3. Copies only the real runtime payload into the stage
+4. Generates a minimal stage `package.json` and `electron-builder.json`
+5. Installs only runtime dependencies inside the stage
+6. Runs Electron Builder from the stage directory, not from the repo root
+7. Exports signed local artifacts into `release/local-macos/{arch}/`
+8. Verifies the built app bundle and nested native binaries with `codesign`
+
+This is the preferred local macOS release path because it packages the exact app payload we intend to ship, while keeping the packaging surface small and auditable.
 
 ### `scripts/prepare-server.mjs` in detail
 
@@ -206,7 +232,10 @@ This ensures tools like `claude` CLI are discoverable by the server.
 | `pnpm build-ui` | Clone upstream + build UI |
 | `pnpm pack` | Full build → packaged app in `release/` (unpacked) |
 | `pnpm dist` | Full build → distributable installers in `release/` |
-| `pnpm dist:mac` | Full build → macOS .dmg + .zip |
+| `pnpm dist:mac` | Staged macOS local release flow → signed `.dmg` + `.zip` in `release/local-macos/` |
+| `pnpm release:mac:local` | Build staged local macOS artifacts for both `x64` and `arm64` |
+| `pnpm release:mac:local:x64` | Build staged local macOS artifacts for `x64` only |
+| `pnpm release:mac:local:arm64` | Build staged local macOS artifacts for `arm64` only |
 | `pnpm dist:win` | Full build → Windows NSIS + portable |
 | `pnpm dist:linux` | Full build → Linux AppImage + .deb |
 
@@ -307,9 +336,13 @@ pnpm version patch
 git push origin master --tags
 ```
 
-### Code signing (future)
+### Code signing and notarization
 
-The release workflow has commented-out code signing configuration. When ready:
+Local macOS release builds are now signed during packaging. The staged local flow resolves a `Developer ID Application` identity from the login keychain, uses Electron Builder for normal app signing, and then verifies the finished app bundle plus the nested `app-server` runtime payload.
+
+The local flow intentionally does **not** notarize or staple. That remains a separate approval step after artifact testing.
+
+When enabling CI notarization later:
 
 1. Add these secrets to the GitHub repo (Settings → Secrets → Actions):
 
@@ -324,6 +357,8 @@ The release workflow has commented-out code signing configuration. When ready:
    | `WIN_CERTIFICATE_PASSWORD` | Password for the .pfx |
 
 2. Uncomment the corresponding env vars in `.github/workflows/release.yml`
+
+For the complete local signing and staged packaging workflow, see `docs-desktop/macos-staged-release.md`.
 
 ### GitHub repo setup for releases
 
@@ -350,9 +385,13 @@ If the app crashed and a server is still running:
 
 ### Build fails on macOS with codesign errors
 
-The `after-pack.mjs` script strips extended attributes and ad-hoc signs the app. If it fails:
+The current staged macOS flow requires a real `Developer ID Application` identity and signs the nested runtime binaries inside `Contents/Resources/app-server`. If it fails:
 - Ensure Xcode Command Line Tools are installed: `xcode-select --install`
-- Check for Finder duplicate files in the build output (the script detects these)
+- Ensure `security find-identity -v -p codesigning` shows a `Developer ID Application` identity
+- Re-run the staged build for a single arch to isolate the issue:
+  `pnpm release:mac:local:x64` or `pnpm release:mac:local:arm64`
+- Check `release/local-macos/{arch}/verification-summary.json`
+- See `docs-desktop/macos-staged-release.md` for the full troubleshooting flow
 
 ### UI not loading
 
