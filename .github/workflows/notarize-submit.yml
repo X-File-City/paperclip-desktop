@@ -67,6 +67,7 @@ jobs:
           set -euo pipefail
           mkdir -p notarization-input
           gh release download "${NOTARIZE_TAG}" \
+            --repo "${{ github.repository }}" \
             --pattern "*-mac.zip" \
             --dir notarization-input
 
