@@ -114,7 +114,7 @@ jobs:
 
   build-linux:
     name: Build Linux release
-    if: github.event_name == 'push' || github.event.inputs.platforms == 'all'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.platforms == 'all'
     runs-on: ubuntu-latest
     env:
       RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
@@ -151,7 +151,7 @@ jobs:
 
   build-windows:
     name: Build Windows release
-    if: github.event_name == 'push' || github.event.inputs.platforms == 'all'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.platforms == 'all'
     runs-on: windows-latest
     env:
       RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
@@ -187,7 +187,11 @@ jobs:
 
   publish-release:
     name: Publish GitHub release
-    if: github.event_name == 'push'
+    if: |
+      github.event_name == 'push' &&
+      needs.build-mac.result == 'success' &&
+      (needs.build-linux.result == 'success' || needs.build-linux.result == 'skipped') &&
+      (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped')
     needs:
       - build-mac
       - build-linux
