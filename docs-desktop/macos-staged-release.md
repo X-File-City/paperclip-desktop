@@ -13,7 +13,8 @@ This document explains the current macOS release architecture in this repository
 
 This guide is written for developers who know nothing about the project yet.
 
-For the CI/release workflow that sits on top of this local staged flow, see `docs-desktop/release-automation-log.md`.
+For the CI/release workflow decision log, see `docs-desktop/release-automation-log.md`.
+For the repeatable release operator steps, see `docs-desktop/release-runbook.md`.
 
 ## Short version
 

@@ -36,7 +36,8 @@ paperclip-desktop/
 ```
 
 For the current macOS packaging flow, see `docs-desktop/macos-staged-release.md`.
-For the current release automation decision log and operator workflow, see `docs-desktop/release-automation-log.md`.
+For the current release automation decision log, see `docs-desktop/release-automation-log.md`.
+For the repeatable operator checklist, see `docs-desktop/release-runbook.md`.
 
 ## How it works
 
