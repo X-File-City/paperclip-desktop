@@ -36,6 +36,7 @@ paperclip-desktop/
 ```
 
 For the current macOS packaging flow, see `docs-desktop/macos-staged-release.md`.
+For the current release automation decision log and operator workflow, see `docs-desktop/release-automation-log.md`.
 
 ## How it works
 
@@ -127,6 +128,17 @@ That flow:
 8. Verifies the built app bundle and nested native binaries with `codesign`
 
 This is the preferred local macOS release path because it packages the exact app payload we intend to ship, while keeping the packaging surface small and auditable.
+
+### Release automation split
+
+The repository also now has a documented two-phase release automation model:
+
+1. build signed staged macOS artifacts for review
+2. notarize approved prebuilt macOS app bundles later
+
+This avoids paying the notarization cost during every build verification run and prevents duplicate notarization passes on CI.
+
+For the full rationale and operator instructions, see `docs-desktop/release-automation-log.md`.
 
 ### `scripts/prepare-server.mjs` in detail
 
@@ -359,6 +371,7 @@ When enabling CI notarization later:
 2. Uncomment the corresponding env vars in `.github/workflows/release.yml`
 
 For the complete local signing and staged packaging workflow, see `docs-desktop/macos-staged-release.md`.
+For the release-automation split between build verification and approved notarization, see `docs-desktop/release-automation-log.md`.
 
 ### GitHub repo setup for releases
 

@@ -13,6 +13,8 @@ This document explains the current macOS release architecture in this repository
 
 This guide is written for developers who know nothing about the project yet.
 
+For the CI/release workflow that sits on top of this local staged flow, see `docs-desktop/release-automation-log.md`.
+
 ## Short version
 
 The macOS packaging flow no longer treats the repo root as the packaging source of truth.
@@ -326,6 +328,21 @@ Useful flags:
 - `--skip-install`
 - `--keep-stage`
 - `--output-root <dir>`
+
+## Relationship to CI
+
+The staged local flow is the basis for the macOS CI build flow as well.
+
+The intended CI pattern is:
+
+1. build signed staged artifacts with no notarization
+2. test and approve those artifacts
+3. notarize the approved prebuilt `.app` later
+4. repackage ZIP/DMG from that approved notarized app
+
+That split exists to keep macOS build verification fast enough and to avoid burning runner minutes on Apple notarization before the artifacts are approved.
+
+The detailed CI decision log and instructions live in `docs-desktop/release-automation-log.md`.
 
 ## What files to test
 
