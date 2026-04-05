@@ -23,9 +23,11 @@ const projectRoot = resolve(__dirname, "..");
 const rootPackageJson = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8"));
 
 const DEFAULT_ARCHES = ["x64", "arm64"];
-const PRODUCT_NAME = "Paperclip";
+const PRODUCT_NAME = "Paperclip Desktop";
 const APP_ID = "com.paperclipai.app";
 const COPYRIGHT = "Copyright © 2026 Aron Prins";
+const PUBLISH_OWNER = "aronprins";
+const PUBLISH_REPO = "paperclip-desktop";
 
 const args = process.argv.slice(2);
 
@@ -112,6 +114,30 @@ function resolveMacSigningIdentity() {
 
 function ensureDir(dir) {
   mkdirSync(dir, { recursive: true });
+}
+
+function removeGeneratedMetadata(dir) {
+  if (!existsSync(dir)) return;
+
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    let stat;
+
+    try {
+      stat = lstatSync(full);
+    } catch {
+      continue;
+    }
+
+    if (stat.isDirectory()) {
+      removeGeneratedMetadata(full);
+      continue;
+    }
+
+    if (entry === ".DS_Store" || entry === "builder-debug.yml") {
+      rmSync(full, { force: true });
+    }
+  }
 }
 
 function removeBrokenSymlinks(dir) {
@@ -279,6 +305,12 @@ function buildStageConfig(arch) {
         filter: ["**/*"],
       },
     ],
+    publish: {
+      provider: "github",
+      owner: PUBLISH_OWNER,
+      repo: PUBLISH_REPO,
+      releaseType: "release",
+    },
     mac: {
       category: "public.app-category.developer-tools",
       icon: "build/icon.icns",
@@ -465,6 +497,7 @@ function buildArch(arch, outputRoot, keepStage, signingInfo) {
     const stageReleaseDir = join(stageAppDir, "release");
     assertExists(stageReleaseDir, `Release output for ${arch}`);
     copyReleaseContents(stageReleaseDir, archOutputDir);
+    removeGeneratedMetadata(archOutputDir);
     verifyStageArtifacts(archOutputDir, signingInfo);
 
     const stageManifest = {

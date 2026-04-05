@@ -1,0 +1,231 @@
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to build for release verification
+        required: false
+        default: master
+      platforms:
+        description: Platforms to build
+        required: false
+        default: mac
+        type: choice
+        options:
+          - mac
+          - all
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-mac:
+    name: Build staged macOS artifacts
+    runs-on: macos-latest
+    environment: release
+    env:
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare Apple signing assets
+        env:
+          APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
+          MAC_CERTIFICATE_P12_BASE64: ${{ secrets.MAC_CERTIFICATE_P12_BASE64 }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/paperclip-signing.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/paperclip-signing.p12"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          export KEYCHAIN_PATH CERT_PATH
+
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+
+          python - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          raw = "".join(os.environ["MAC_CERTIFICATE_P12_BASE64"].split())
+          Path(os.environ["CERT_PATH"]).write_bytes(base64.b64decode(raw))
+          PY
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MAC_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+          {
+            echo "CSC_KEYCHAIN=$KEYCHAIN_PATH"
+            echo "KEYCHAIN_PATH=$KEYCHAIN_PATH"
+            echo "CERT_PATH=$CERT_PATH"
+          } >> "$GITHUB_ENV"
+
+      - name: Build staged macOS distributables
+        env:
+          APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm release:mac:local
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-mac-staged
+          path: release/local-macos
+          if-no-files-found: error
+
+      - name: Clean up Apple signing assets
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -n "${KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
+          rm -f "${CERT_PATH:-}"
+
+  build-linux:
+    name: Build Linux release
+    if: github.event_name == 'push' || github.event.inputs.platforms == 'all'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Linux distributables
+        run: pnpm dist:linux
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: |
+            release/*.AppImage
+            release/*.deb
+            release/*.blockmap
+            release/latest*.yml
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows release
+    if: github.event_name == 'push' || github.event.inputs.platforms == 'all'
+    runs-on: windows-latest
+    env:
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Windows distributables
+        run: pnpm dist:win
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/latest*.yml
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub release
+    if: github.event_name == 'push'
+    needs:
+      - build-mac
+      - build-linux
+      - build-windows
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mapfile -d '' files < <(
+            find dist-artifacts -type f \
+              \( \
+                -name '*.dmg' -o \
+                -name '*.zip' -o \
+                -name '*.exe' -o \
+                -name '*.AppImage' -o \
+                -name '*.deb' -o \
+                -name '*.blockmap' -o \
+                -name 'latest*.yml' \
+              \) \
+              -print0 | sort -z
+          )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No release artifacts were produced." >&2
+            exit 1
+          fi
+
+          tag="${GITHUB_REF_NAME}"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            gh release create "$tag" "${files[@]}" --title "$tag" --verify-tag
+          fi

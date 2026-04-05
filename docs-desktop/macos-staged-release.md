@@ -350,16 +350,16 @@ After a successful build:
 
 ### x64
 
-- `release/local-macos/x64/mac/Paperclip.app`
-- `release/local-macos/x64/Paperclip-1.0.0.dmg`
-- `release/local-macos/x64/Paperclip-1.0.0-mac.zip`
+- `release/local-macos/x64/mac/Paperclip Desktop.app`
+- `release/local-macos/x64/Paperclip Desktop-1.0.0.dmg`
+- `release/local-macos/x64/Paperclip Desktop-1.0.0-mac.zip`
 - `release/local-macos/x64/verification-summary.json`
 
 ### arm64
 
-- `release/local-macos/arm64/mac-arm64/Paperclip.app`
-- `release/local-macos/arm64/Paperclip-1.0.0-arm64.dmg`
-- `release/local-macos/arm64/Paperclip-1.0.0-arm64-mac.zip`
+- `release/local-macos/arm64/mac-arm64/Paperclip Desktop.app`
+- `release/local-macos/arm64/Paperclip Desktop-1.0.0-arm64.dmg`
+- `release/local-macos/arm64/Paperclip Desktop-1.0.0-arm64-mac.zip`
 - `release/local-macos/arm64/verification-summary.json`
 
 For first-pass local QA, launch the `.app` bundles directly.
@@ -407,32 +407,32 @@ The verifier does not require stapling by default. That is intentional because l
 ### Check the app bundle
 
 ```bash
-codesign --verify --deep --strict --verbose=2 release/local-macos/x64/mac/Paperclip.app
-codesign -dvv release/local-macos/x64/mac/Paperclip.app
+codesign --verify --deep --strict --verbose=2 release/local-macos/x64/mac/Paperclip\ Desktop.app
+codesign -dvv release/local-macos/x64/mac/Paperclip\ Desktop.app
 ```
 
 ### Check bundled Node
 
 ```bash
 codesign --verify --strict --verbose=2 \
-  release/local-macos/x64/mac/Paperclip.app/Contents/Resources/app-server/node-bin/node
+  release/local-macos/x64/mac/Paperclip\ Desktop.app/Contents/Resources/app-server/node-bin/node
 
 codesign -dvv \
-  release/local-macos/x64/mac/Paperclip.app/Contents/Resources/app-server/node-bin/node
+  release/local-macos/x64/mac/Paperclip\ Desktop.app/Contents/Resources/app-server/node-bin/node
 ```
 
 ### Check embedded Postgres
 
 ```bash
 codesign --verify --strict --verbose=2 \
-  release/local-macos/x64/mac/Paperclip.app/Contents/Resources/app-server/server/node_modules/@embedded-postgres/darwin-x64/native/bin/initdb
+  release/local-macos/x64/mac/Paperclip\ Desktop.app/Contents/Resources/app-server/server/node_modules/@embedded-postgres/darwin-x64/native/bin/initdb
 ```
 
 ### Check a native module
 
 ```bash
 codesign --verify --strict --verbose=2 \
-  release/local-macos/x64/mac/Paperclip.app/Contents/Resources/app-server/server/node_modules/@img/sharp-darwin-x64/lib/sharp-darwin-x64.node
+  release/local-macos/x64/mac/Paperclip\ Desktop.app/Contents/Resources/app-server/server/node_modules/@img/sharp-darwin-x64/lib/sharp-darwin-x64.node
 ```
 
 ## Typical developer workflow
@@ -533,7 +533,7 @@ Symptom:
 Check:
 
 ```bash
-codesign -dvv release/local-macos/arm64/mac-arm64/Paperclip.app/Contents/Resources/app-server/node-bin/node
+codesign -dvv release/local-macos/arm64/mac-arm64/Paperclip\ Desktop.app/Contents/Resources/app-server/node-bin/node
 ```
 
 Expected:

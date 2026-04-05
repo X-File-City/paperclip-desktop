@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const projectRoot = resolve(__dirname, "..");
+const PRODUCT_NAME = "Paperclip Desktop";
 const args = process.argv.slice(2);
 
 function requireEnv(name) {
@@ -63,10 +64,11 @@ function walk(dir, out = []) {
 }
 
 function findAppBundle(rootDir, arch) {
+  const appBundleName = `${PRODUCT_NAME}.app`;
   const candidates = [
-    join(rootDir, arch, arch === "arm64" ? "mac-arm64" : "mac", "Paperclip.app"),
-    join(rootDir, "local-macos", arch, arch === "arm64" ? "mac-arm64" : "mac", "Paperclip.app"),
-    join(rootDir, "release", "local-macos", arch, arch === "arm64" ? "mac-arm64" : "mac", "Paperclip.app"),
+    join(rootDir, arch, arch === "arm64" ? "mac-arm64" : "mac", appBundleName),
+    join(rootDir, "local-macos", arch, arch === "arm64" ? "mac-arm64" : "mac", appBundleName),
+    join(rootDir, "release", "local-macos", arch, arch === "arm64" ? "mac-arm64" : "mac", appBundleName),
   ];
 
   for (const candidate of candidates) {
@@ -76,7 +78,7 @@ function findAppBundle(rootDir, arch) {
   }
 
   const discovered = walk(rootDir).find((entry) =>
-    entry.endsWith(arch === "arm64" ? "/mac-arm64/Paperclip.app" : "/mac/Paperclip.app")
+    entry.endsWith(arch === "arm64" ? `/mac-arm64/${appBundleName}` : `/mac/${appBundleName}`)
       && entry.includes(`/${arch}/`),
   );
 

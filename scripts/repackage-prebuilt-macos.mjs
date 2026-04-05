@@ -10,7 +10,7 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const projectRoot = resolve(__dirname, "..");
 const rootPackageJson = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8"));
 
-const PRODUCT_NAME = "Paperclip";
+const PRODUCT_NAME = "Paperclip Desktop";
 const APP_ID = "com.paperclipai.app";
 const COPYRIGHT = "Copyright © 2026 Aron Prins";
 const OWNER = "aronprins";
