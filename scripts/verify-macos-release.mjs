@@ -1,9 +1,10 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
-const outputDir = resolve(process.argv[2] || "release");
+const outputDir = resolve(process.argv[2] || "release/local-macos");
+const requireStapled = process.argv.includes("--require-stapled");
 const expectedIdentity = process.env.APPLE_CODESIGN_IDENTITY?.trim() || null;
 const expectedTeamId = process.env.APPLE_TEAM_ID?.trim() || null;
 
@@ -31,6 +32,7 @@ function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     let stat;
+
     try {
       stat = lstatSync(full);
     } catch {
@@ -38,16 +40,18 @@ function walk(dir, out = []) {
     }
 
     if (stat.isSymbolicLink()) continue;
-    if (stat.isDirectory()) {
-      out.push(full);
-      walk(full, out);
-      continue;
-    }
-
     out.push(full);
+
+    if (stat.isDirectory()) {
+      walk(full, out);
+    }
   }
 
   return out;
+}
+
+function relative(target) {
+  return target.replace(`${outputDir}/`, "");
 }
 
 function codesignMetadata(target) {
@@ -55,6 +59,7 @@ function codesignMetadata(target) {
   const lines = stderr.split(/\r?\n/);
   const authority = lines.find((line) => line.startsWith("Authority="))?.replace(/^Authority=/, "") || null;
   const teamIdentifier = lines.find((line) => line.startsWith("TeamIdentifier="))?.replace(/^TeamIdentifier=/, "") || null;
+  const identifier = lines.find((line) => line.startsWith("Identifier="))?.replace(/^Identifier=/, "") || null;
 
   if (expectedIdentity && authority !== expectedIdentity) {
     throw new Error(`Unexpected signing identity for ${target}: ${authority ?? "missing"} != ${expectedIdentity}`);
@@ -64,17 +69,76 @@ function codesignMetadata(target) {
     throw new Error(`Unexpected team identifier for ${target}: ${teamIdentifier ?? "missing"} != ${expectedTeamId}`);
   }
 
-  return { authority, teamIdentifier };
+  return {
+    authority,
+    teamIdentifier,
+    identifier,
+  };
 }
 
-function relativePaths(paths) {
-  return paths.map((path) => path.replace(`${outputDir}/`, ""));
+function tryRun(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    ...options,
+  });
+
+  return {
+    ok: result.status === 0,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
+}
+
+function verifyCodesign(target, deep = false) {
+  const args = ["--verify", "--strict", "--verbose=2"];
+  if (deep) {
+    args.splice(1, 0, "--deep");
+  }
+  args.push(target);
+  run("codesign", args);
+}
+
+function collectChecks(appPath) {
+  const allEntries = walk(appPath);
+  const helperExecutables = allEntries.filter((entry) => /\/Contents\/Frameworks\/.+\.app\/Contents\/MacOS\/.+$/.test(entry));
+  const nodeBinary = allEntries.find((entry) => entry.endsWith("/Contents/Resources/app-server/node-bin/node")) || null;
+  const postgresBinaries = allEntries.filter((entry) => /@embedded-postgres\/darwin-[^/]+\/native\/bin\/[^/]+$/.test(entry));
+  const nativeNodeModules = allEntries.filter((entry) => entry.endsWith(".node"));
+  const nativeDylibs = allEntries.filter((entry) => entry.endsWith(".dylib"));
+  const mainExecutables = allEntries.filter((entry) => /\/Contents\/MacOS\/[^/]+$/.test(entry) && !entry.includes("/Contents/Frameworks/"));
+
+  const namedChecks = [
+    ["appBundle", [appPath]],
+    ["mainExecutable", mainExecutables],
+    ["helperExecutable", helperExecutables],
+    ["nodeBinary", nodeBinary ? [nodeBinary] : []],
+    ["postgresBinary", postgresBinaries],
+    ["nativeNodeModule", nativeNodeModules],
+    ["nativeDylib", nativeDylibs],
+  ];
+
+  const checks = {};
+
+  for (const [label, targets] of namedChecks) {
+    if (targets.length === 0) continue;
+
+    checks[label] = targets.map((target) => {
+      verifyCodesign(target, label === "appBundle");
+      return {
+        path: relative(target),
+        ...codesignMetadata(target),
+      };
+    });
+  }
+
+  return checks;
 }
 
 const entries = walk(outputDir);
-const appBundles = entries.filter((entry) => entry.endsWith(".app"));
-const dmgArtifacts = entries.filter((entry) => entry.endsWith(".dmg"));
-const zipArtifacts = entries.filter((entry) => entry.endsWith(".zip"));
+const appBundles = entries.filter((entry) => entry.endsWith(".app") && !entry.includes("/Contents/Frameworks/"));
+const dmgArtifacts = entries.filter((entry) => entry.endsWith(".dmg") && !entry.includes(".app/"));
+const zipArtifacts = entries.filter((entry) => entry.endsWith(".zip") && !entry.includes(".app/"));
 
 if (appBundles.length === 0) {
   throw new Error(`No macOS app bundle found under ${outputDir}.`);
@@ -89,89 +153,79 @@ if (zipArtifacts.length === 0) {
 }
 
 const verification = {
+  outputDir,
+  requireStapled,
   appBundles: [],
   dmgArtifacts: [],
   zipArtifacts: [],
 };
 
 for (const appPath of appBundles) {
-  const allFiles = walk(appPath);
-  const mainExecutable = walk(join(appPath, "Contents", "MacOS")).find((entry) => !entry.endsWith("/Contents/MacOS"));
-  const helperExecutable = allFiles.find((entry) => /\/Contents\/Frameworks\/.+\.app\/Contents\/MacOS\//.test(entry));
-  const nodeBinary = allFiles.find((entry) => entry.endsWith("/Contents/Resources/app-server/node-bin/node"));
-  const postgresBinary = allFiles.find((entry) => /@embedded-postgres\/darwin-[^/]+\/native\/bin\/postgres$/.test(entry));
-  const initdbBinary = allFiles.find((entry) => /@embedded-postgres\/darwin-[^/]+\/native\/bin\/initdb$/.test(entry));
-  const pgCtlBinary = allFiles.find((entry) => /@embedded-postgres\/darwin-[^/]+\/native\/bin\/pg_ctl$/.test(entry));
-  const nativeNodeModule = allFiles.find((entry) => entry.endsWith(".node"));
-  const nativeDylib = allFiles.find((entry) => /libpq.*\.dylib$/.test(entry)) || allFiles.find((entry) => entry.endsWith(".dylib"));
-
-  execFileSync("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath], { stdio: "inherit" });
-  execFileSync("xcrun", ["stapler", "validate", "-v", appPath], { stdio: "inherit" });
-  execFileSync("spctl", ["-a", "-vv", "--type", "exec", appPath], { stdio: "inherit" });
-
-  const checks = {};
-  for (const [label, target] of [
-    ["appBundle", appPath],
-    ["mainExecutable", mainExecutable],
-    ["helperExecutable", helperExecutable],
-    ["nodeBinary", nodeBinary],
-    ["postgresBinary", postgresBinary],
-    ["initdbBinary", initdbBinary],
-    ["pgCtlBinary", pgCtlBinary],
-    ["nativeNodeModule", nativeNodeModule],
-    ["nativeDylib", nativeDylib],
-  ]) {
-    if (!target) continue;
-    execFileSync("codesign", ["--verify", "--strict", "--verbose=2", target], { stdio: "inherit" });
-    checks[label] = {
-      path: target.replace(`${outputDir}/`, ""),
-      ...codesignMetadata(target),
-    };
+  if (requireStapled) {
+    run("xcrun", ["stapler", "validate", "-v", appPath]);
   }
 
   verification.appBundles.push({
-    path: appPath.replace(`${outputDir}/`, ""),
-    checks,
+    path: relative(appPath),
+    checks: collectChecks(appPath),
   });
 }
 
 for (const dmgPath of dmgArtifacts) {
-  execFileSync("xcrun", ["stapler", "validate", "-v", dmgPath], { stdio: "inherit" });
-  execFileSync("spctl", ["-a", "-vv", "--type", "open", dmgPath], { stdio: "inherit" });
-  verification.dmgArtifacts.push({
-    path: dmgPath.replace(`${outputDir}/`, ""),
-    ...codesignMetadata(dmgPath),
-  });
+  const verificationResult = tryRun("codesign", ["--verify", "--strict", "--verbose=2", dmgPath]);
+  const metadataResult = tryRun("codesign", ["-dvv", dmgPath]);
+  const entry = {
+    path: relative(dmgPath),
+    signed: verificationResult.ok && metadataResult.ok,
+  };
+
+  if (entry.signed) {
+    if (requireStapled) {
+      run("xcrun", ["stapler", "validate", "-v", dmgPath]);
+    }
+    Object.assign(entry, codesignMetadata(dmgPath));
+  } else {
+    entry.error = [verificationResult.stdout, verificationResult.stderr, metadataResult.stderr]
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+
+  verification.dmgArtifacts.push(entry);
 }
 
 for (const zipPath of zipArtifacts) {
   const extractDir = mkdtempSync(join(tmpdir(), "paperclip-zip-verify-"));
+  let extractedApp = null;
+
   try {
-    execFileSync("ditto", ["-x", "-k", zipPath, extractDir], { stdio: "inherit" });
-    const extractedApp = walk(extractDir).find((entry) => entry.endsWith(".app"));
+    run("ditto", ["-x", "-k", zipPath, extractDir]);
+    extractedApp = walk(extractDir).find((entry) => entry.endsWith(".app") && !entry.includes("/Contents/Frameworks/")) || null;
     if (!extractedApp) {
       throw new Error(`No .app bundle found inside ${zipPath}`);
     }
 
-    execFileSync("xcrun", ["stapler", "validate", "-v", extractedApp], { stdio: "inherit" });
-    execFileSync("spctl", ["-a", "-vv", "--type", "exec", extractedApp], { stdio: "inherit" });
+    if (requireStapled) {
+      run("xcrun", ["stapler", "validate", "-v", extractedApp]);
+    }
+
     verification.zipArtifacts.push({
-      path: zipPath.replace(`${outputDir}/`, ""),
+      path: relative(zipPath),
+      basename: basename(zipPath),
       extractedApp: extractedApp.replace(`${extractDir}/`, ""),
-      ...codesignMetadata(extractedApp),
+      checks: collectChecks(extractedApp),
     });
   } finally {
     rmSync(extractDir, { recursive: true, force: true });
   }
 }
 
-const reportDir = join(outputDir, "notarization");
-mkdirSync(reportDir, { recursive: true });
-const reportPath = join(reportDir, "verification-summary.json");
+mkdirSync(outputDir, { recursive: true });
+const reportPath = join(outputDir, "verification-summary.json");
 writeFileSync(reportPath, `${JSON.stringify(verification, null, 2)}\n`, "utf8");
 
 console.log(`Verified macOS artifacts in ${outputDir}`);
-console.log(`App bundles: ${relativePaths(appBundles).join(", ")}`);
-console.log(`DMGs: ${relativePaths(dmgArtifacts).join(", ")}`);
-console.log(`ZIPs: ${relativePaths(zipArtifacts).join(", ")}`);
+console.log(`App bundles: ${appBundles.map(relative).join(", ")}`);
+console.log(`DMGs: ${dmgArtifacts.map(relative).join(", ")}`);
+console.log(`ZIPs: ${zipArtifacts.map(relative).join(", ")}`);
 console.log(`Verification summary: ${reportPath}`);

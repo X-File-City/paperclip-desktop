@@ -14,9 +14,12 @@
     "start": "electron dist/main.js",
     "prepare-server": "node scripts/prepare-server.mjs",
     "build-ui": "node scripts/build-ui.mjs",
+    "release:mac:local": "node scripts/release-macos-local.mjs",
+    "release:mac:local:x64": "node scripts/release-macos-local.mjs --arch x64",
+    "release:mac:local:arm64": "node scripts/release-macos-local.mjs --arch arm64",
     "pack": "pnpm build && pnpm prepare-server && pnpm build-ui && electron-builder --dir",
     "dist": "pnpm build && pnpm prepare-server && pnpm build-ui && electron-builder",
-    "dist:mac": "pnpm build && pnpm prepare-server && pnpm build-ui && electron-builder --mac",
+    "dist:mac": "node scripts/release-macos-local.mjs",
     "dist:win": "pnpm build && pnpm prepare-server && pnpm build-ui && electron-builder --win",
     "dist:linux": "pnpm build && pnpm prepare-server && pnpm build-ui && electron-builder --linux"
   },

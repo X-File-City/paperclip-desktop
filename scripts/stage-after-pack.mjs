@@ -1,22 +1,34 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, openSync, closeSync, readSync, readdirSync, readlinkSync, rmSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  lstatSync,
+  openSync,
+  readSync,
+  readdirSync,
+  readlinkSync,
+  rmSync,
+} from "node:fs";
 import { join } from "node:path";
 
-/** Remove broken symlinks recursively. codesign fails on dangling links. */
+const MACH_O_MAGICS = new Set([
+  "feedface",
+  "cefaedfe",
+  "feedfacf",
+  "cffaedfe",
+  "cafebabe",
+  "bebafeca",
+  "cafebabf",
+  "bfbafeca",
+]);
+
 function removeBrokenSymlinks(dir) {
   if (!existsSync(dir)) return;
 
-  let entries;
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return;
-  }
-
-  for (const entry of entries) {
+  for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
-
     let stat;
+
     try {
       stat = lstatSync(full);
     } catch {
@@ -42,16 +54,18 @@ function removeBrokenSymlinks(dir) {
   }
 }
 
-const MACH_O_MAGICS = new Set([
-  "feedface",
-  "cefaedfe",
-  "feedfacf",
-  "cffaedfe",
-  "cafebabe",
-  "bebafeca",
-  "cafebabf",
-  "bfbafeca",
-]);
+function stripBundleMetadata(appPath) {
+  removeBrokenSymlinks(join(appPath, "Contents"));
+
+  try {
+    execFileSync("dot_clean", [appPath]);
+  } catch {
+    // Best effort only.
+  }
+
+  execFileSync("sh", ["-c", `find "${appPath}" -name "._*" -delete 2>/dev/null; find "${appPath}" -name ".DS_Store" -delete 2>/dev/null; true`]);
+  execFileSync("sh", ["-c", `find "${appPath}" ! -type l -print0 | xargs -0 -n 200 xattr -c 2>/dev/null; true`]);
+}
 
 function isMachOBinary(target) {
   let fd;
@@ -69,7 +83,7 @@ function isMachOBinary(target) {
       try {
         closeSync(fd);
       } catch {
-        // best-effort cleanup
+        // Best effort cleanup.
       }
     }
   }
@@ -80,8 +94,8 @@ function collectSignableBinaries(dir, out = []) {
 
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
-
     let stat;
+
     try {
       stat = lstatSync(full);
     } catch {
@@ -94,29 +108,13 @@ function collectSignableBinaries(dir, out = []) {
       continue;
     }
 
-    const looksNativeBinary = entry.endsWith(".dylib") || entry.endsWith(".node") || (stat.mode & 0o111) !== 0;
-    if (!looksNativeBinary || !isMachOBinary(full)) continue;
+    const looksNative = entry.endsWith(".dylib") || entry.endsWith(".node") || (stat.mode & 0o111) !== 0;
+    if (!looksNative || !isMachOBinary(full)) continue;
 
     out.push({ path: full, mode: stat.mode });
   }
 
   return out;
-}
-
-function stripBundleMetadata(appPath) {
-  console.log("[after-pack] Cleaning broken symlinks...");
-  removeBrokenSymlinks(join(appPath, "Contents"));
-
-  console.log("[after-pack] Cleaning AppleDouble / .DS_Store files...");
-  try {
-    execFileSync("dot_clean", [appPath]);
-  } catch {
-    // best effort only
-  }
-  execFileSync("sh", ["-c", `find "${appPath}" -name "._*" -delete 2>/dev/null; find "${appPath}" -name ".DS_Store" -delete 2>/dev/null; true`]);
-
-  console.log("[after-pack] Stripping extended attributes...");
-  execFileSync("sh", ["-c", `find "${appPath}" ! -type l -print0 | xargs -0 -n 200 xattr -c 2>/dev/null; true`]);
 }
 
 function signTarget(target, identity, entitlements) {
@@ -128,7 +126,6 @@ function signTarget(target, identity, entitlements) {
   }
   args.push(target);
 
-  console.log(`[after-pack]   codesign ${target}`);
   execFileSync("codesign", args, { stdio: "inherit" });
 }
 
@@ -148,13 +145,12 @@ export default async function afterPack(context) {
   );
 
   if (!signingIdentity) {
-    throw new Error("macOS release signing requires APPLE_CODESIGN_IDENTITY or CSC_NAME.");
+    throw new Error("staged macOS release signing requires APPLE_CODESIGN_IDENTITY or CSC_NAME.");
   }
 
   stripBundleMetadata(appPath);
 
   if (!existsSync(appServerPath)) {
-    console.log("[after-pack] No app-server bundle found, skipping nested runtime signing.");
     return;
   }
 
@@ -168,7 +164,6 @@ export default async function afterPack(context) {
     return rightDepth - leftDepth;
   });
 
-  console.log(`[after-pack] Signing ${signableBinaries.length} nested runtime binary/binaries...`);
   for (const { path: target, mode } of signableBinaries) {
     const isLibrary = target.endsWith(".dylib") || target.endsWith(".node");
     const needsEntitlements = !isLibrary && (mode & 0o111) !== 0;
