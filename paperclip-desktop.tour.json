@@ -1,0 +1,190 @@
+{
+  "id": "paperclip-desktop-onboarding",
+  "title": "Paperclip Desktop",
+  "description": "A guided tour of the Paperclip Desktop Electron app - from the main process and server lifecycle to the build pipeline and release automation.",
+  "version": "1.0.0",
+  "audience": "New Contributors",
+  "prerequisites": [
+    "Familiarity with Electron main/renderer architecture",
+    "Basic understanding of Node.js and TypeScript"
+  ],
+  "steps": [
+    {
+      "id": "overview",
+      "title": "Project Overview",
+      "description": "Paperclip Desktop is an Electron wrapper around the Paperclip AI orchestration server. It bundles the server, a dedicated runtime, and the Paperclip UI into a native desktop app with auto-updates, code signing, and a splash screen. The entire Electron shell is only about 2000 lines of code.",
+      "estimatedTime": 60,
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "electron-main-process",
+      "title": "Main Process - The Heart",
+      "description": "The highlighted file is the core of the app. It manages the entire server lifecycle - port discovery, process spawning, splash screen progress, health checks, and UI loading. It also handles orphan cleanup and graceful shutdown.",
+      "estimatedTime": 120,
+      "focusDirectory": "src",
+      "highlightLayers": [
+        {
+          "id": "main-process",
+          "name": "Main Process",
+          "color": "#3b82f6",
+          "items": [
+            { "path": "src/main.ts", "type": "file" }
+          ],
+          "opacity": 0.8,
+          "borderWidth": 3
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "ipc-preload-layer",
+      "title": "IPC & Preload Security",
+      "description": "Electron's security model is enforced through preload scripts with context isolation. The main preload bridges the renderer to the auto-updater. The splash preload feeds real-time progress events to the splash screen. Node integration is disabled - all communication flows through these narrow IPC channels.",
+      "estimatedTime": 90,
+      "focusDirectory": "src",
+      "highlightLayers": [
+        {
+          "id": "preload-scripts",
+          "name": "Preload Scripts",
+          "color": "#10b981",
+          "items": [
+            { "path": "src/preload.ts", "type": "file" },
+            { "path": "src/splash-preload.ts", "type": "file" }
+          ],
+          "opacity": 0.8,
+          "borderWidth": 3
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "auto-updater",
+      "title": "Auto-Update System",
+      "description": "The highlighted file checks GitHub Releases every 4 hours for new versions. Updates download in the background, then prompt the user to restart. The renderer receives live status updates through the preload IPC bridge.",
+      "estimatedTime": 60,
+      "focusDirectory": "src",
+      "highlightLayers": [
+        {
+          "id": "updater",
+          "name": "Auto-Updater",
+          "color": "#f59e0b",
+          "items": [
+            { "path": "src/updater.ts", "type": "file" }
+          ],
+          "opacity": 0.8,
+          "borderWidth": 3
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "build-pipeline",
+      "title": "Build Pipeline Scripts",
+      "description": "This directory contains the multi-stage build pipeline. The core scripts bundle the server, build the upstream UI, launch dev mode, and orchestrate staged macOS releases. A second layer handles code signing and Apple notarization.",
+      "estimatedTime": 120,
+      "focusDirectory": "scripts",
+      "highlightLayers": [
+        {
+          "id": "core-build-scripts",
+          "name": "Core Build Scripts",
+          "color": "#8b5cf6",
+          "items": [
+            { "path": "scripts/prepare-server.mjs", "type": "file" },
+            { "path": "scripts/build-ui.mjs", "type": "file" },
+            { "path": "scripts/dev.mjs", "type": "file" },
+            { "path": "scripts/release-macos-local.mjs", "type": "file" }
+          ],
+          "opacity": 0.7,
+          "borderWidth": 2
+        },
+        {
+          "id": "signing-scripts",
+          "name": "Signing & Notarization",
+          "color": "#ef4444",
+          "items": [
+            { "path": "scripts/after-pack.mjs", "type": "file" },
+            { "path": "scripts/stage-after-pack.mjs", "type": "file" },
+            { "path": "scripts/notarize-prebuilt-macos.mjs", "type": "file" },
+            { "path": "scripts/verify-macos-release.mjs", "type": "file" }
+          ],
+          "opacity": 0.7,
+          "borderWidth": 2
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "packaging-and-ci",
+      "title": "Packaging & CI/CD",
+      "description": "The packaging configuration targets DMG, NSIS, and AppImage across platforms. The build resources hold macOS entitlements and app icons. GitHub Actions handle a two-phase release: build and publish first, then Apple notarization as a separate approval step.",
+      "estimatedTime": 90,
+      "focusDirectory": "",
+      "highlightLayers": [
+        {
+          "id": "packaging-config",
+          "name": "Packaging Config",
+          "color": "#06b6d4",
+          "items": [
+            { "path": "electron-builder.yml", "type": "file" },
+            { "path": "build", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "borderWidth": 2
+        },
+        {
+          "id": "ci-workflows",
+          "name": "CI/CD Workflows",
+          "color": "#f97316",
+          "items": [
+            { "path": ".github/workflows/release.yml", "type": "file" },
+            { "path": ".github/workflows/notarize-submit.yml", "type": "file" },
+            { "path": ".github/workflows/notarize-status.yml", "type": "file" }
+          ],
+          "opacity": 0.7,
+          "borderWidth": 2
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "documentation",
+      "title": "Architecture Documentation",
+      "description": "This directory contains detailed technical documentation. The highlighted files cover the full architecture reference, a step-by-step release checklist, and the staged macOS packaging flow with signing and notarization details.",
+      "estimatedTime": 60,
+      "focusDirectory": "docs-desktop",
+      "highlightLayers": [
+        {
+          "id": "key-docs",
+          "name": "Key Documentation",
+          "color": "#ec4899",
+          "items": [
+            { "path": "docs-desktop/architecture.md", "type": "file" },
+            { "path": "docs-desktop/release-runbook.md", "type": "file" },
+            { "path": "docs-desktop/macos-staged-release.md", "type": "file" }
+          ],
+          "opacity": 0.7,
+          "borderWidth": 2
+        }
+      ],
+      "colorMode": "fileTypes"
+    },
+    {
+      "id": "full-picture",
+      "title": "The Full Picture",
+      "description": "That's the complete Paperclip Desktop architecture. For deeper dives, start with the architecture reference in the documentation directory or explore the code directly.",
+      "estimatedTime": 30,
+      "focusDirectory": "",
+      "colorMode": "fileTypes"
+    }
+  ],
+  "metadata": {
+    "author": "Michael Flannery",
+    "createdAt": "2026-04-05T00:00:00.000Z",
+    "tags": [
+      "onboarding",
+      "electron",
+      "desktop",
+      "architecture"
+    ]
+  }
+}
