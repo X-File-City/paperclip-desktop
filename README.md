@@ -1,183 +1,79 @@
 <p align="center">
-  <img src="doc/assets/header.png" alt="Paperclip — runs your business" width="720" />
+  <strong>Paperclip Desktop</strong><br/>
+  A one-click desktop app for <a href="https://github.com/paperclipai/paperclip">Paperclip</a>.
 </p>
 
 <p align="center">
   <a href="#quickstart"><strong>Quickstart</strong></a> &middot;
+  <a href="https://github.com/paperclipai/paperclip"><strong>Paperclip (upstream)</strong></a> &middot;
   <a href="https://paperclip.ing/docs"><strong>Docs</strong></a> &middot;
-  <a href="https://github.com/paperclipai/paperclip"><strong>GitHub</strong></a> &middot;
   <a href="https://discord.gg/m4HZY7xNG3"><strong>Discord</strong></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/paperclipai/paperclip/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
-  <a href="https://github.com/paperclipai/paperclip/stargazers"><img src="https://img.shields.io/github/stars/paperclipai/paperclip?style=flat" alt="Stars" /></a>
-  <a href="https://discord.gg/m4HZY7xNG3"><img src="https://img.shields.io/discord/000000000?label=discord" alt="Discord" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
 </p>
 
 <br/>
 
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/773bdfb2-6d1e-4e30-8c5f-3487d5b70c8f" width="600" controls></video>
-</div>
+## What is this?
+
+**Paperclip Desktop** is an unofficial [Electron](https://www.electronjs.org/) wrapper around [Paperclip](https://github.com/paperclipai/paperclip). It bundles Paperclip (via the official `@paperclipai/server` npm package) inside a native desktop app for macOS. Windows and Linux builds are coming soon.
+
+The goal is simple: **make running Paperclip as easy as opening an app.**
+
+- 🖱 **One click to launch** — double-click the app and Paperclip starts automatically. No terminal, no `pnpm install`, no Node.js setup.
+- 📦 **Paperclip inside** — ships an unmodified build of the upstream Paperclip server and UI. What you get in the app is exactly what you'd get by cloning and running the main repo.
+- 🔄 **Auto-updates** — pulls new desktop releases automatically via GitHub Releases.
+- 🖥 **Native menus, windowing, and system tray** — the Paperclip UI, but as a real desktop app.
+
+Under the hood, on launch the app:
+
+1. Picks a free local port (starting at `3100`)
+2. Spawns the bundled Paperclip Node.js server
+3. Waits for it to become healthy
+4. Loads the Paperclip UI in a native Electron window
+
+When you quit the app, the server is cleanly shut down.
+
+> For everything Paperclip itself can do — orchestrating AI agents, running autonomous companies, governance, budgets, org charts, etc. — see the **[upstream Paperclip repo](https://github.com/paperclipai/paperclip)**. This project does not modify or extend Paperclip's functionality; it only packages it.
 
 <br/>
 
-## What is Paperclip?
+## Relationship to upstream Paperclip
 
-# Open-source orchestration for zero-human companies
+| This repo (`paperclip-desktop`)              | Upstream ([`paperclipai/paperclip`](https://github.com/paperclipai/paperclip)) |
+| -------------------------------------------- | ------------------------------------------------------------------------------ |
+| Electron shell + installers                  | The actual Paperclip server, UI, and features                                  |
+| Maintained by Aron Prins (community)         | Maintained by the Paperclip team                                               |
+| Bundles `@paperclipai/server` as a dependency| Source of that package                                                         |
+| MIT licensed                                 | MIT licensed                                                                   |
 
-**If OpenClaw is an _employee_, Paperclip is the _company_**
-
-Paperclip is a Node.js server and React UI that orchestrates a team of AI agents to run a business. Bring your own agents, assign goals, and track your agents' work and costs from one dashboard.
-
-It looks like a task manager — but under the hood it has org charts, budgets, governance, goal alignment, and agent coordination.
-
-**Manage business goals, not pull requests.**
-
-|        | Step            | Example                                                            |
-| ------ | --------------- | ------------------------------------------------------------------ |
-| **01** | Define the goal | _"Build the #1 AI note-taking app to $1M MRR."_                    |
-| **02** | Hire the team   | CEO, CTO, engineers, designers, marketers — any bot, any provider. |
-| **03** | Approve and run | Review strategy. Set budgets. Hit go. Monitor from the dashboard.  |
-
-<br/>
-
-> **COMING SOON: Clipmart** — Download and run entire companies with one click. Browse pre-built company templates — full org structures, agent configs, and skills — and import them into your Paperclip instance in seconds.
-
-<br/>
-
-<div align="center">
-<table>
-  <tr>
-    <td align="center"><strong>Works<br/>with</strong></td>
-    <td align="center"><img src="doc/assets/logos/openclaw.svg" width="32" alt="OpenClaw" /><br/><sub>OpenClaw</sub></td>
-    <td align="center"><img src="doc/assets/logos/claude.svg" width="32" alt="Claude" /><br/><sub>Claude Code</sub></td>
-    <td align="center"><img src="doc/assets/logos/codex.svg" width="32" alt="Codex" /><br/><sub>Codex</sub></td>
-    <td align="center"><img src="doc/assets/logos/cursor.svg" width="32" alt="Cursor" /><br/><sub>Cursor</sub></td>
-    <td align="center"><img src="doc/assets/logos/bash.svg" width="32" alt="Bash" /><br/><sub>Bash</sub></td>
-    <td align="center"><img src="doc/assets/logos/http.svg" width="32" alt="HTTP" /><br/><sub>HTTP</sub></td>
-  </tr>
-</table>
-
-<em>If it can receive a heartbeat, it's hired.</em>
-
-</div>
-
-<br/>
-
-## Paperclip is right for you if
-
-- ✅ You want to build **autonomous AI companies**
-- ✅ You **coordinate many different agents** (OpenClaw, Codex, Claude, Cursor) toward a common goal
-- ✅ You have **20 simultaneous Claude Code terminals** open and lose track of what everyone is doing
-- ✅ You want agents running **autonomously 24/7**, but still want to audit work and chime in when needed
-- ✅ You want to **monitor costs** and enforce budgets
-- ✅ You want a process for managing agents that **feels like using a task manager**
-- ✅ You want to manage your autonomous businesses **from your phone**
-
-<br/>
-
-## Features
-
-<table>
-<tr>
-<td align="center" width="33%">
-<h3>🔌 Bring Your Own Agent</h3>
-Any agent, any runtime, one org chart. If it can receive a heartbeat, it's hired.
-</td>
-<td align="center" width="33%">
-<h3>🎯 Goal Alignment</h3>
-Every task traces back to the company mission. Agents know <em>what</em> to do and <em>why</em>.
-</td>
-<td align="center" width="33%">
-<h3>💓 Heartbeats</h3>
-Agents wake on a schedule, check work, and act. Delegation flows up and down the org chart.
-</td>
-</tr>
-<tr>
-<td align="center">
-<h3>💰 Cost Control</h3>
-Monthly budgets per agent. When they hit the limit, they stop. No runaway costs.
-</td>
-<td align="center">
-<h3>🏢 Multi-Company</h3>
-One deployment, many companies. Complete data isolation. One control plane for your portfolio.
-</td>
-<td align="center">
-<h3>🎫 Ticket System</h3>
-Every conversation traced. Every decision explained. Full tool-call tracing and immutable audit log.
-</td>
-</tr>
-<tr>
-<td align="center">
-<h3>🛡️ Governance</h3>
-You're the board. Approve hires, override strategy, pause or terminate any agent — at any time.
-</td>
-<td align="center">
-<h3>📊 Org Chart</h3>
-Hierarchies, roles, reporting lines. Your agents have a boss, a title, and a job description.
-</td>
-<td align="center">
-<h3>📱 Mobile Ready</h3>
-Monitor and manage your autonomous businesses from anywhere.
-</td>
-</tr>
-</table>
-
-<br/>
-
-## Problems Paperclip solves
-
-| Without Paperclip                                                                                                                     | With Paperclip                                                                                                                         |
-| ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| ❌ You have 20 Claude Code tabs open and can't track which one does what. On reboot you lose everything.                              | ✅ Tasks are ticket-based, conversations are threaded, sessions persist across reboots.                                                |
-| ❌ You manually gather context from several places to remind your bot what you're actually doing.                                     | ✅ Context flows from the task up through the project and company goals — your agent always knows what to do and why.                  |
-| ❌ Folders of agent configs are disorganized and you're re-inventing task management, communication, and coordination between agents. | ✅ Paperclip gives you org charts, ticketing, delegation, and governance out of the box — so you run a company, not a pile of scripts. |
-| ❌ Runaway loops waste hundreds of dollars of tokens and max your quota before you even know what happened.                           | ✅ Cost tracking surfaces token budgets and throttles agents when they're out. Management prioritizes with budgets.                    |
-| ❌ You have recurring jobs (customer support, social, reports) and have to remember to manually kick them off.                        | ✅ Heartbeats handle regular work on a schedule. Management supervises.                                                                |
-| ❌ You have an idea, you have to find your repo, fire up Claude Code, keep a tab open, and babysit it.                                | ✅ Add a task in Paperclip. Your coding agent works on it until it's done. Management reviews their work.                              |
-
-<br/>
-
-## Why Paperclip is special
-
-Paperclip handles the hard orchestration details correctly.
-
-|                                   |                                                                                                               |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **Atomic execution.**             | Task checkout and budget enforcement are atomic, so no double-work and no runaway spend.                      |
-| **Persistent agent state.**       | Agents resume the same task context across heartbeats instead of restarting from scratch.                     |
-| **Runtime skill injection.**      | Agents can learn Paperclip workflows and project context at runtime, without retraining.                      |
-| **Governance with rollback.**     | Approval gates are enforced, config changes are revisioned, and bad changes can be rolled back safely.        |
-| **Goal-aware execution.**         | Tasks carry full goal ancestry so agents consistently see the "why," not just a title.                        |
-| **Portable company templates.**   | Export/import orgs, agents, and skills with secret scrubbing and collision handling.                          |
-| **True multi-company isolation.** | Every entity is company-scoped, so one deployment can run many companies with separate data and audit trails. |
-
-<br/>
-
-## What Paperclip is not
-
-|                              |                                                                                                                      |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| **Not a chatbot.**           | Agents have jobs, not chat windows.                                                                                  |
-| **Not an agent framework.**  | We don't tell you how to build agents. We tell you how to run a company made of them.                                |
-| **Not a workflow builder.**  | No drag-and-drop pipelines. Paperclip models companies — with org charts, goals, budgets, and governance.            |
-| **Not a prompt manager.**    | Agents bring their own prompts, models, and runtimes. Paperclip manages the organization they work in.               |
-| **Not a single-agent tool.** | This is for teams. If you have one agent, you probably don't need Paperclip. If you have twenty — you definitely do. |
-| **Not a code review tool.**  | Paperclip orchestrates work, not pull requests. Bring your own review process.                                       |
+This is an **independent community distribution**. It is not an official Paperclip release. All credit for Paperclip itself goes to the upstream project and its authors.
 
 <br/>
 
 ## Quickstart
 
-Open source. Self-hosted. No Paperclip account required.
+### Install the desktop app
+
+Download the latest installer for your platform from the [Releases page](https://github.com/aronprins/paperclip-desktop/releases):
+
+- **macOS** — `.dmg` (Apple Silicon and Intel)
+- **Windows** — _coming soon_
+- **Linux** — _coming soon_
+
+Open the app. Paperclip starts automatically and the dashboard opens in the app window. That's it.
+
+### Prefer the original?
+
+If you'd rather run Paperclip yourself from source (no desktop wrapper), follow the upstream instructions:
 
 ```bash
 npx paperclipai onboard --yes
 ```
 
-Or manually:
+Or:
 
 ```bash
 git clone https://github.com/paperclipai/paperclip.git
@@ -186,94 +82,59 @@ pnpm install
 pnpm dev
 ```
 
-This starts the API server at `http://localhost:3100`. An embedded PostgreSQL database is created automatically — no setup required.
-
-> **Requirements:** Node.js 20+, pnpm 9.15+
-
-<br/>
-
-## FAQ
-
-**What does a typical setup look like?**
-Locally, a single Node.js process manages an embedded Postgres and local file storage. For production, point it at your own Postgres and deploy however you like. Configure projects, agents, and goals — the agents take care of the rest.
-
-If you're a solo-entreprenuer you can use Tailscale to access Paperclip on the go. Then later you can deploy to e.g. Vercel when you need it.
-
-**Can I run multiple companies?**
-Yes. A single deployment can run an unlimited number of companies with complete data isolation.
-
-**How is Paperclip different from agents like OpenClaw or Claude Code?**
-Paperclip _uses_ those agents. It orchestrates them into a company — with org charts, budgets, goals, governance, and accountability.
-
-**Why should I use Paperclip instead of just pointing my OpenClaw to Asana or Trello?**
-Agent orchestration has subtleties in how you coordinate who has work checked out, how to maintain sessions, monitoring costs, establishing governance - Paperclip does this for you.
-
-(Bring-your-own-ticket-system is on the Roadmap)
-
-**Do agents run continuously?**
-By default, agents run on scheduled heartbeats and event-based triggers (task assignment, @-mentions). You can also hook in continuous agents like OpenClaw. You bring your agent and Paperclip coordinates.
+See [github.com/paperclipai/paperclip](https://github.com/paperclipai/paperclip) for full docs.
 
 <br/>
 
 ## Development
 
+Requirements: Node.js 20+, pnpm 9.15+.
+
 ```bash
-pnpm dev              # Full dev (API + UI, watch mode)
-pnpm dev:once         # Full dev without file watching
-pnpm dev:server       # Server only
-pnpm build            # Build all
-pnpm typecheck        # Type checking
-pnpm test:run         # Run tests
-pnpm db:generate      # Generate DB migration
-pnpm db:migrate       # Apply migrations
+pnpm install           # Install deps
+pnpm dev               # Run Electron in dev mode against the bundled server
+pnpm build             # Compile the Electron main/preload TypeScript
+pnpm prepare-server    # Stage the Paperclip server bundle into build/
+pnpm build-ui          # Stage the Paperclip UI
+pnpm pack              # Build an unpacked app directory (no installer)
+pnpm dist              # Build full installers for the current platform
+pnpm dist:mac          # macOS (.dmg + .zip, signed/notarized via local script)
 ```
 
-See [doc/DEVELOPING.md](doc/DEVELOPING.md) for the full development guide.
+Key files:
 
-<br/>
-
-## Roadmap
-
-- ⚪ Get OpenClaw onboarding easier
-- ⚪ Get cloud agents working e.g. Cursor / e2b agents
-- ⚪ ClipMart - buy and sell entire agent companies
-- ⚪ Easy agent configurations / easier to understand
-- ⚪ Better support for harness engineering
-- 🟢 Plugin system (e.g. if you want to add a knowledgebase, custom tracing, queues, etc)
-- ⚪ Better docs
-
-<br/>
-
-## Contributing
-
-We welcome contributions. See the [contributing guide](CONTRIBUTING.md) for details.
-
-<br/>
-
-## Community
-
-- [Discord](https://discord.gg/m4HZY7xNG3) — Join the community
-- [GitHub Issues](https://github.com/paperclipai/paperclip/issues) — bugs and feature requests
-- [GitHub Discussions](https://github.com/paperclipai/paperclip/discussions) — ideas and RFC
+- `src/main.ts` — Electron main process: spawns the Paperclip server, manages its lifecycle, and opens the window
+- `src/preload.ts` — Preload script for the renderer
+- `src/updater.ts` — Auto-update wiring (`electron-updater` against GitHub Releases)
+- `electron-builder.yml` — Packaging config; bundles the `@paperclipai/server` npm package plus a platform-specific Node.js binary into `Resources/app-server/`
+- `scripts/` — Build and release automation (server staging, macOS notarization, etc.)
 
 <br/>
 
 ## License
 
-MIT &copy; 2026 Paperclip
+MIT © 2026 Aron Prins.
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/image?repos=paperclipai/paperclip&type=date&legend=top-left)](https://www.star-history.com/?repos=paperclipai%2Fpaperclip&type=date&legend=top-left)
+This project wraps a bundled copy of [Paperclip](https://github.com/paperclipai/paperclip), which is also MIT licensed © Paperclip. See [LICENSE](./LICENSE) for the full text. The upstream Paperclip license ships inside the packaged app alongside its source.
 
 <br/>
 
----
+## Disclaimer — use at your own risk
 
-<p align="center">
-  <img src="doc/assets/footer.jpg" alt="" width="720" />
-</p>
+Paperclip Desktop is provided **"as is", without warranty of any kind**, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and noninfringement. In no event shall the authors or copyright holders be liable for any claim, damages, or other liability, whether in an action of contract, tort, or otherwise, arising from, out of, or in connection with the software or the use or other dealings in the software.
 
-<p align="center">
-  <sub>Open source under MIT. Built for people who want to run companies, not babysit agents.</sub>
-</p>
+By using this app you acknowledge that:
+
+- It runs AI agents that can execute code, make API calls, and **spend money** on AI model providers on your behalf. You are solely responsible for any costs incurred.
+- It is an **unofficial community distribution**. It is not endorsed by, affiliated with, or supported by the upstream Paperclip team.
+- It wraps third-party software (Paperclip and its dependencies). The authors of this wrapper accept **no liability** for the behavior of the bundled Paperclip server, any agents you configure, or any outcomes produced by them.
+- You are responsible for reviewing agent actions, setting budgets, and operating the software in accordance with the terms of any AI providers and services you connect to it.
+
+If you do not accept these terms, do not install or use the app.
+
+<br/>
+
+## Credits
+
+- **Paperclip** — the actual product: [github.com/paperclipai/paperclip](https://github.com/paperclipai/paperclip)
+- **Paperclip Desktop** — this Electron wrapper, maintained by [Aron Prins](https://github.com/aronprins)
