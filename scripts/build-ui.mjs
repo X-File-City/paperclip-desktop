@@ -11,7 +11,7 @@
  * be simplified to just copy from node_modules.
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { existsSync, readFileSync, mkdirSync, rmSync, cpSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +21,7 @@ const projectRoot = path.resolve(__dirname, "..");
 
 const bundleRootDir = path.join(projectRoot, "build", "server-bundle");
 const cloneDir = path.join(projectRoot, "build", "upstream-clone");
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 function getBundleUiDistDirs() {
   if (!existsSync(bundleRootDir)) return [];
@@ -59,17 +60,26 @@ if (!serverVersion) {
 // ── Try to install @paperclipai/ui from npm first (future-proofing) ─────────
 
 try {
-  const uiVersion = execSync(`npm view @paperclipai/ui@${serverVersion} version 2>/dev/null`, {
-    encoding: "utf8",
-    timeout: 15000,
-  }).trim();
+  const uiVersion = execFileSync(
+    npmCommand,
+    ["view", `@paperclipai/ui@${serverVersion}`, "version"],
+    {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 15000,
+    },
+  ).trim();
 
   if (uiVersion) {
     console.log(`[build-ui] Found @paperclipai/ui@${uiVersion} on npm, installing...`);
     const uiStagingDir = path.join(projectRoot, "build", "ui-staging");
     if (existsSync(uiStagingDir)) rmSync(uiStagingDir, { recursive: true, force: true });
     mkdirSync(uiStagingDir, { recursive: true });
-    execSync(`npm pack @paperclipai/ui@${uiVersion} --pack-destination "${uiStagingDir}"`, { stdio: "inherit" });
+    execFileSync(
+      npmCommand,
+      ["pack", `@paperclipai/ui@${uiVersion}`, "--pack-destination", uiStagingDir],
+      { stdio: "inherit" },
+    );
     // Extract and copy dist/
     const tarballs = readdirSync(uiStagingDir)
       .filter((entry) => entry.endsWith(".tgz"))

@@ -21,8 +21,8 @@
     "pack": "pnpm build && pnpm prepare-server && pnpm build-ui && electron-builder --dir",
     "dist": "pnpm build && pnpm prepare-server && pnpm build-ui && electron-builder",
     "dist:mac": "node scripts/release-macos-local.mjs",
-    "dist:win": "pnpm build && pnpm prepare-server && pnpm build-ui && electron-builder --win",
-    "dist:linux": "pnpm build && pnpm prepare-server && pnpm build-ui && electron-builder --linux"
+    "dist:win": "pnpm build && pnpm prepare-server && pnpm build-ui && electron-builder --win --publish never",
+    "dist:linux": "pnpm build && pnpm prepare-server && pnpm build-ui && electron-builder --linux --publish never"
   },
   "dependencies": {
     "tree-kill": "^1.2.2",
