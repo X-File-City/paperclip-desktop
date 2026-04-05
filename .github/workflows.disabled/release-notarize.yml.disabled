@@ -1,0 +1,110 @@
+name: Notarize Approved macOS Release Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: GitHub Actions run id for the approved build workflow
+        required: true
+      ref:
+        description: Git ref to use for the notarization scripts
+        required: false
+        default: master
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: release-notarize-${{ github.workflow }}-${{ github.event.inputs.build_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  notarize-mac:
+    name: Notarize approved macOS artifacts
+    runs-on: macos-latest
+    environment: release
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare Apple notarization credentials
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          API_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          export API_KEY_PATH
+
+          python - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          api_key = os.environ["APPLE_API_KEY_P8"]
+          if "\\n" in api_key and "\n" not in api_key:
+              api_key = api_key.replace("\\n", "\n")
+          if "BEGIN PRIVATE KEY" not in api_key:
+              api_key = base64.b64decode("".join(api_key.split())).decode("utf-8")
+          if not api_key.endswith("\n"):
+              api_key += "\n"
+          Path(os.environ["API_KEY_PATH"]).write_text(api_key, encoding="utf-8")
+          PY
+
+          xcrun notarytool history \
+            --key "$API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            >/dev/null
+
+          echo "APPLE_API_KEY=$API_KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Download approved staged macOS artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p release/build-artifacts
+          gh run download "${{ github.event.inputs.build_run_id }}" \
+            --name release-mac-staged \
+            --dir release/build-artifacts
+
+      - name: Notarize and repackage approved macOS artifacts
+        env:
+          APPLE_API_KEY: ${{ env.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          pnpm release:mac:notarize:prebuilt \
+            --input-root release/build-artifacts \
+            --output-root release/notarized-macos
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-mac-notarized
+          path: release/notarized-macos
+          if-no-files-found: error
+
+      - name: Clean up Apple notarization credentials
+        if: always()
+        run: rm -f "${APPLE_API_KEY:-}"

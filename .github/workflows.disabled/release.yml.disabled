@@ -1,4 +1,4 @@
-name: Release Desktop
+name: Build Desktop Release Artifacts
 
 on:
   push:
@@ -20,26 +20,19 @@ on:
           - all
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.workflow }}-${{ github.ref }}
+  group: release-build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   build-mac:
-    name: Build macOS ${{ matrix.arch }} release
+    name: Build staged macOS artifacts
     runs-on: macos-latest
     environment: release
-    strategy:
-      fail-fast: false
-      matrix:
-        arch:
-          - x64
-          - arm64
     env:
       RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
-      PAPERCLIP_REQUIRE_MACOS_RELEASE_SIGNING: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -60,9 +53,6 @@ jobs:
 
       - name: Prepare Apple signing assets
         env:
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
           APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
           MAC_CERTIFICATE_P12_BASE64: ${{ secrets.MAC_CERTIFICATE_P12_BASE64 }}
           MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
@@ -72,10 +62,8 @@ jobs:
 
           KEYCHAIN_PATH="$RUNNER_TEMP/paperclip-signing.keychain-db"
           CERT_PATH="$RUNNER_TEMP/paperclip-signing.p12"
-          API_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
           KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
-          CSC_NAME_NORMALIZED="${APPLE_CODESIGN_IDENTITY#Developer ID Application: }"
-          export CERT_PATH API_KEY_PATH
+          export KEYCHAIN_PATH CERT_PATH
 
           echo "::add-mask::$KEYCHAIN_PASSWORD"
 
@@ -86,15 +74,6 @@ jobs:
 
           raw = "".join(os.environ["MAC_CERTIFICATE_P12_BASE64"].split())
           Path(os.environ["CERT_PATH"]).write_bytes(base64.b64decode(raw))
-
-          api_key = os.environ["APPLE_API_KEY_P8"]
-          if "\\n" in api_key and "\n" not in api_key:
-              api_key = api_key.replace("\\n", "\n")
-          if "BEGIN PRIVATE KEY" not in api_key:
-              api_key = base64.b64decode("".join(api_key.split())).decode("utf-8")
-          if not api_key.endswith("\n"):
-              api_key += "\n"
-          Path(os.environ["API_KEY_PATH"]).write_text(api_key, encoding="utf-8")
           PY
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
@@ -104,80 +83,24 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
           security default-keychain -d user -s "$KEYCHAIN_PATH"
-
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
-          xcrun notarytool history \
-            --key "$API_KEY_PATH" \
-            --key-id "$APPLE_API_KEY_ID" \
-            --issuer "$APPLE_API_ISSUER" \
-            >/dev/null
 
           {
-            echo "APPLE_API_KEY=$API_KEY_PATH"
             echo "CSC_KEYCHAIN=$KEYCHAIN_PATH"
-            echo "CSC_NAME=$CSC_NAME_NORMALIZED"
             echo "KEYCHAIN_PATH=$KEYCHAIN_PATH"
             echo "CERT_PATH=$CERT_PATH"
-            echo "API_KEY_PATH=$API_KEY_PATH"
           } >> "$GITHUB_ENV"
 
-      - name: Build Electron TypeScript
-        run: pnpm run build
-
-      - name: Prepare server bundle
-        run: pnpm run prepare-server
-
-      - name: Build UI from upstream
-        run: pnpm run build-ui
-
-      - name: Build macOS distributables
-        env:
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          PAPERCLIP_NOTARY_TIMEOUT_MS: "2700000"
-        run: pnpm exec electron-builder --mac --${{ matrix.arch }} --publish never
-
-      - name: Notarize and staple DMG artifacts
-        env:
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-        run: |
-          set -euo pipefail
-          mkdir -p release/notarization
-          shopt -s nullglob
-
-          for dmg in release/*.dmg; do
-            base="$(basename "$dmg" .dmg)"
-            log_path="release/notarization/${base}.dmg.json"
-
-            xcrun notarytool submit "$dmg" \
-              --key "$APPLE_API_KEY" \
-              --key-id "$APPLE_API_KEY_ID" \
-              --issuer "$APPLE_API_ISSUER" \
-              --wait \
-              --output-format json | tee "$log_path"
-
-            xcrun stapler staple -v "$dmg"
-            xcrun stapler validate -v "$dmg"
-          done
-
-      - name: Verify macOS release artifacts
+      - name: Build staged macOS distributables
         env:
           APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: node scripts/verify-macos-release.mjs release
+        run: pnpm release:mac:local
 
       - uses: actions/upload-artifact@v4
         with:
-          name: release-mac-${{ matrix.arch }}
-          path: |
-            release/*.dmg
-            release/*.zip
-            release/*.blockmap
-            release/*.yml
-            release/notarization/**
+          name: release-mac-staged
+          path: release/local-macos
           if-no-files-found: error
 
       - name: Clean up Apple signing assets
@@ -187,7 +110,7 @@ jobs:
           if [ -n "${KEYCHAIN_PATH:-}" ]; then
             security delete-keychain "$KEYCHAIN_PATH" || true
           fi
-          rm -f "${CERT_PATH:-}" "${API_KEY_PATH:-}"
+          rm -f "${CERT_PATH:-}"
 
   build-linux:
     name: Build Linux release
@@ -213,17 +136,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Electron TypeScript
-        run: pnpm run build
-
-      - name: Prepare server bundle
-        run: pnpm run prepare-server
-
-      - name: Build UI from upstream
-        run: pnpm run build-ui
-
       - name: Build Linux distributables
-        run: pnpm exec electron-builder --linux --publish never
+        run: pnpm dist:linux
 
       - uses: actions/upload-artifact@v4
         with:
@@ -259,17 +173,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Electron TypeScript
-        run: pnpm run build
-
-      - name: Prepare server bundle
-        run: pnpm run prepare-server
-
-      - name: Build UI from upstream
-        run: pnpm run build-ui
-
       - name: Build Windows distributables
-        run: pnpm exec electron-builder --win --publish never
+        run: pnpm dist:win
 
       - uses: actions/upload-artifact@v4
         with:
@@ -279,48 +184,3 @@ jobs:
             release/*.blockmap
             release/*.yml
           if-no-files-found: error
-
-  publish-release:
-    name: Publish GitHub release
-    if: github.event_name == 'push'
-    needs:
-      - build-mac
-      - build-linux
-      - build-windows
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist-artifacts
-
-      - name: Create or update GitHub release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          mapfile -d '' files < <(
-            find dist-artifacts -type f \
-              \( \
-                -name '*.dmg' -o \
-                -name '*.zip' -o \
-                -name '*.exe' -o \
-                -name '*.AppImage' -o \
-                -name '*.deb' -o \
-                -name '*.blockmap' -o \
-                -name '*.yml' \
-              \) \
-              -print0 | sort -z
-          )
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "No release artifacts were produced." >&2
-            exit 1
-          fi
-
-          tag="${GITHUB_REF_NAME}"
-
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "${files[@]}" --clobber
-          else
-            gh release create "$tag" "${files[@]}" --title "$tag" --verify-tag
-          fi

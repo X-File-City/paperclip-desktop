@@ -17,6 +17,7 @@
     "release:mac:local": "node scripts/release-macos-local.mjs",
     "release:mac:local:x64": "node scripts/release-macos-local.mjs --arch x64",
     "release:mac:local:arm64": "node scripts/release-macos-local.mjs --arch arm64",
+    "release:mac:notarize:prebuilt": "node scripts/notarize-prebuilt-macos.mjs",
     "pack": "pnpm build && pnpm prepare-server && pnpm build-ui && electron-builder --dir",
     "dist": "pnpm build && pnpm prepare-server && pnpm build-ui && electron-builder",
     "dist:mac": "node scripts/release-macos-local.mjs",
