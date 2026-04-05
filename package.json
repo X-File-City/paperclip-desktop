@@ -30,7 +30,7 @@
     "electron-log": "^5.2.0"
   },
   "devDependencies": {
-    "@paperclipai/server": "2026.403.0-canary.5",
+    "@paperclipai/server": "2026.403.0",
     "electron": "^41.0.4",
     "electron-builder": "^25.1.8",
     "typescript": "^5.7.3"
